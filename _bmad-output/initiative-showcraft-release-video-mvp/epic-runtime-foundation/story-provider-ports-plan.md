@@ -3,7 +3,7 @@ title: '实现 Provider Ports 与核心编排器'
 type: 'feature'
 ticket: '4'
 created: '2026-09-28'
-status: ready-for-dev
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
