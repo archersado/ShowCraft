@@ -5,6 +5,7 @@
 - [x] 1.1 初始化 pnpm TypeScript workspace、共享 lint/test/typecheck 脚本和 run 目录忽略规则，并验证 `pnpm typecheck` 可执行
 - [x] 1.2 定义 release brief、evidence pack、scene plan、render manifest、run/review 状态的 schema，并验证合法与非法输入单测通过
 - [x] 1.3 实现文件化 run 记录与阶段产物持久化（端口编排器在 1.4），并验证失败阶段保留已完成产物和诊断
+- [x] 1.4 实现可注入 provider ports 与核心编排器，并验证任一 provider 失败写入正确失败阶段和原因
 
 ## 2. 发布来源与代码证据
 

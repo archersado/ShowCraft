@@ -61,5 +61,16 @@ export {
 
 export type { RunStage, RunStoreEvent, RunStoreFile, StageArtifact, StageFailure } from "./runStore.js";
 
+export {
+  createMockReleaseSource,
+  createMockRenderer,
+  createMockScenePlanner,
+} from "./ports.js";
+
+export type { ReleaseSourcePort, RendererPort, ScenePlannerPort } from "./ports.js";
+
+export { runPipeline } from "./orchestrator.js";
+export type { PipelinePorts } from "./orchestrator.js";
+
 export { createMockTracerResult } from "./tracer.js";
 export type { MockTracerResult } from "./tracer.js";

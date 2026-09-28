@@ -2,7 +2,13 @@ import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
-import { createMockTracerResult, RunStoreCore } from "@showcraft/core";
+import {
+  createMockReleaseSource,
+  createMockRenderer,
+  createMockScenePlanner,
+  RunStoreCore,
+  runPipeline,
+} from "@showcraft/core";
 
 import { createRunDirectory, persistRunEvents } from "./runStore.js";
 
@@ -23,28 +29,22 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
   validateRunId(runId);
 
   const store = new RunStoreCore(runId);
-  const tracer = createMockTracerResult();
-
-  // Stage artifacts through the run store so they are schema-validated and
-  // deterministically serialized; the tracer's release doubles as the scene
-  // plan source until a real scene stage exists.
-  store.recordArtifact({ stage: "release", value: tracer.release });
-  store.recordArtifact({
-    stage: "scenePlan",
-    value: {
-      releaseVersion: tracer.release.version,
-      scenes: tracer.manifest.scenes.map((scene) => ({
-        id: scene.id,
-        featureId: scene.featureId,
-        title: scene.title,
-        narration: scene.narration,
-        narrationSource: "narration" as const,
-        plannedDurationSeconds: 15,
-      })),
+  // CLI assembles mock adapters; core only sees the ports.
+  await runPipeline(
+    {
+      releaseSource: createMockReleaseSource(),
+      scenePlanner: createMockScenePlanner(),
+      renderer: createMockRenderer(),
     },
-  });
-  store.recordArtifact({ stage: "manifest", value: tracer.manifest });
-  store.complete();
+    store,
+  );
+
+  if (store.currentStatus !== "completed") {
+    const failure = store.currentFailure;
+    throw new Error(
+      `Demo pipeline failed at ${failure?.stage ?? "unknown stage"}: ${failure?.reason ?? "no diagnostics"}`,
+    );
+  }
 
   const runDirectory = await createRunDirectory(outputRoot, runId, { cwd: options.cwd });
   await persistRunEvents(runDirectory, store.collectFiles());

@@ -1,0 +1,126 @@
+import { describe, expect, it } from "vitest";
+
+import { runPipeline } from "./orchestrator.js";
+import { RunStoreCore } from "./runStore.js";
+import {
+  createMockReleaseSource,
+  createMockRenderer,
+  createMockScenePlanner,
+} from "./ports.js";
+import type { PipelinePorts } from "./ports.js";
+
+function mockPorts(): PipelinePorts {
+  return {
+    releaseSource: createMockReleaseSource(),
+    scenePlanner: createMockScenePlanner(),
+    renderer: createMockRenderer(),
+  };
+}
+
+describe("runPipeline", () => {
+  it("completes all stages with mock providers", async () => {
+    const store = new RunStoreCore("orch-ok");
+    await runPipeline(mockPorts(), store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual(["release.json", "scene.json", "manifest.json", "run.json"]);
+  });
+
+  it("records failure stage and keeps prior artifacts when the renderer throws", async () => {
+    const ports = mockPorts();
+    ports.renderer = () => {
+      throw new Error("renderer exploded");
+    };
+    const store = new RunStoreCore("orch-render-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("manifest");
+    expect(store.currentFailure?.reason).toContain("renderer exploded");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toContain("release.json");
+    expect(files).toContain("scene.json");
+    expect(files).not.toContain("manifest.json");
+    const record = JSON.parse(
+      new TextDecoder().decode(store.collectFiles().find((f) => f.fileName === "run.json")?.bytes),
+    );
+    expect(record.status).toBe("failed");
+  });
+
+  it("records failure at release stage when the source throws first", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => {
+      throw new Error("no changelog");
+    };
+    const store = new RunStoreCore("orch-source-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("release");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual(["run.json"]);
+  });
+
+  it("fails at the planner stage when the planner throws after a good release", async () => {
+    const ports = mockPorts();
+    ports.scenePlanner = () => {
+      throw new Error("planner offline");
+    };
+    const store = new RunStoreCore("orch-planner-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("scenePlan");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
+  });
+
+  it("rejects invalid provider output via schema instead of accepting it", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "v0.3.3",
+      source: "mock://showcraft/demo-release",
+      features: [],
+    });
+    const store = new RunStoreCore("orch-invalid");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("release");
+    expect(store.currentFailure?.reason).toContain("features");
+  });
+
+  it("accepts fully custom fake providers without core changes", async () => {
+    const ports: PipelinePorts = {
+      releaseSource: () => ({
+        version: "v9.9.9",
+        source: "fake://source",
+        features: [{ id: "f1", title: "T", narration: "N" }],
+      }),
+      scenePlanner: (release) => ({
+        releaseVersion: release.version,
+        scenes: release.features.map((feature) => ({
+          id: `s-${feature.id}`,
+          featureId: feature.id,
+          title: feature.title,
+          narration: feature.narration,
+          narrationSource: "narration" as const,
+          plannedDurationSeconds: 5,
+        })),
+      }),
+      renderer: (release, scenePlan) => ({
+        format: "showcraft.mock-manifest/v1",
+        releaseVersion: release.version,
+        scenes: scenePlan.scenes,
+      }),
+    };
+    const store = new RunStoreCore("orch-custom");
+    await runPipeline(ports, store);
+    expect(store.currentStatus).toBe("completed");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+});
