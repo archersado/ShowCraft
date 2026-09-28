@@ -59,6 +59,8 @@ export const releaseBriefSchema = z
 
 export type ReleaseFeature = z.infer<typeof releaseFeatureSchema>;
 export type ReleaseBrief = z.infer<typeof releaseBriefSchema>;
+export type RunStatus = z.infer<typeof runStatusSchema>;
+export type ReviewStatus = z.infer<typeof reviewStatusSchema>;
 
 // ---------------------------------------------------------------------------
 // Evidence pack

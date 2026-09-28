@@ -59,7 +59,7 @@ describe("runDemo", () => {
     await runDemo({ outputRoot: root, runId: "existing-run" });
 
     await expect(runDemo({ outputRoot: root, runId: "existing-run" })).rejects.toThrow(
-      /Unable to create run directory/,
+      /already exists/,
     );
   });
 

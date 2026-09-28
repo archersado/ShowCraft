@@ -35,7 +35,9 @@ export type {
   ReleasePackage,
   RenderManifest,
   ReviewDecision,
+  ReviewStatus,
   RunRecord,
+  RunStatus,
   Scene,
   ScenePlan,
 } from "./domain.js";
@@ -48,6 +50,16 @@ export {
 } from "./serialization.js";
 
 export type { ParseFailure, ParseResult, ParseSuccess } from "./serialization.js";
+
+export {
+  IllegalRunTransitionError,
+  RunAlreadyExistsError,
+  RunStoreCore,
+  runStageOrder,
+  stageFileNames,
+} from "./runStore.js";
+
+export type { RunStage, RunStoreEvent, RunStoreFile, StageArtifact, StageFailure } from "./runStore.js";
 
 export { createMockTracerResult } from "./tracer.js";
 export type { MockTracerResult } from "./tracer.js";

@@ -1,9 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
-import { createMockTracerResult } from "@showcraft/core";
+import { createMockTracerResult, RunStoreCore } from "@showcraft/core";
+
+import { createRunDirectory, persistRunEvents } from "./runStore.js";
 
 export type DemoOptions = {
   outputRoot?: string;
@@ -17,26 +18,36 @@ export type DemoResult = {
 };
 
 export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
-  const outputRoot = resolve(options.cwd ?? process.cwd(), options.outputRoot ?? "runs");
+  const outputRoot = options.outputRoot ?? "runs";
   const runId = options.runId ?? `demo-${Date.now()}-${randomUUID().slice(0, 8)}`;
   validateRunId(runId);
-  const runDirectory = resolve(outputRoot, runId);
 
-  try {
-    await mkdir(outputRoot, { recursive: true });
-    await mkdir(runDirectory);
-  } catch (error) {
-    throw new Error(`Unable to create run directory ${runDirectory}: ${formatError(error)}`);
-  }
-
+  const store = new RunStoreCore(runId);
   const tracer = createMockTracerResult();
-  try {
-    await writeJson(runDirectory, "release.json", tracer.release);
-    await writeJson(runDirectory, "manifest.json", tracer.manifest);
-    await writeJson(runDirectory, "run.json", tracer.run);
-  } catch (error) {
-    throw new Error(`Unable to write demo artifacts in ${runDirectory}: ${formatError(error)}`);
-  }
+
+  // Stage artifacts through the run store so they are schema-validated and
+  // deterministically serialized; the tracer's release doubles as the scene
+  // plan source until a real scene stage exists.
+  store.recordArtifact({ stage: "release", value: tracer.release });
+  store.recordArtifact({
+    stage: "scenePlan",
+    value: {
+      releaseVersion: tracer.release.version,
+      scenes: tracer.manifest.scenes.map((scene) => ({
+        id: scene.id,
+        featureId: scene.featureId,
+        title: scene.title,
+        narration: scene.narration,
+        narrationSource: "narration" as const,
+        plannedDurationSeconds: 15,
+      })),
+    },
+  });
+  store.recordArtifact({ stage: "manifest", value: tracer.manifest });
+  store.complete();
+
+  const runDirectory = await createRunDirectory(outputRoot, runId, { cwd: options.cwd });
+  await persistRunEvents(runDirectory, store.collectFiles());
 
   return { runDirectory, status: "completed" as const };
 }
@@ -53,14 +64,6 @@ export function parseDemoArgs(args: readonly string[]): Pick<DemoOptions, "outpu
   }
 
   throw new Error("Usage: pnpm demo -- [--output <directory>]");
-}
-
-async function writeJson(directory: string, fileName: string, value: unknown): Promise<void> {
-  await writeFile(resolve(directory, fileName), `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function validateRunId(runId: string): void {
