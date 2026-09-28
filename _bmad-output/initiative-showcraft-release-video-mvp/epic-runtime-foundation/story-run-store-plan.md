@@ -3,7 +3,7 @@ title: '实现文件化 Run Store 与阶段持久化'
 type: 'feature'
 ticket: '3'
 created: '2026-09-28'
-status: ready-for-dev
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
