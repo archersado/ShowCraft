@@ -1,0 +1,38 @@
+[[epic]]
+id = 1
+slug = "epic-runtime-foundation"
+title = "运行骨架与可追溯任务模型"
+covers = []
+
+[[epic]]
+id = 2
+slug = "epic-release-evidence"
+title = "发布说明与代码证据发现"
+covers = ["R1", "R2", "R3", "R4"]
+after = [{ epic = 1, needs = "稳定的领域 schema、run 存储和 provider ports" }]
+
+[[epic]]
+id = 3
+slug = "epic-desktop-capture"
+title = "StartUpOS Desktop 自动演示与录屏"
+covers = ["R5", "R6"]
+after = [{ epic = 2, needs = "带置信度的 feature-to-entrypoint evidence pack" }]
+
+[[epic]]
+id = 4
+slug = "epic-video-composition"
+title = "中文视频编排与 Edge TTS"
+covers = ["R7", "R8"]
+after = [{ epic = 1, needs = "scene plan、render manifest 和 run artifact 合同" }]
+
+[[epic]]
+id = 5
+slug = "epic-review-acceptance"
+title = "本机预览、人工审核与端到端验收"
+covers = ["R9", "R10", "R11"]
+after = [
+  { epic = 2, needs = "可追溯 release/evidence 产物" },
+  { epic = 3, needs = "真实桌面录屏素材" },
+  { epic = 4, needs = "已渲染视频与 manifest" },
+]
+

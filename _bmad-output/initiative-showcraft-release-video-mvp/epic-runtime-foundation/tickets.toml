@@ -1,0 +1,88 @@
+[[entry]]
+id = 1
+type = "story"
+title = "Workspace 与 mock CLI tracer"
+description = "初始化 pnpm TypeScript workspace，并交付一条从示例 release brief 经 mock providers 生成 manifest 和最终 run 状态的可运行 CLI tracer。"
+verify = "安装依赖后运行 demo 命令，输出目录包含 release、manifest 和 completed run 状态，且 typecheck 与 test 通过。"
+covers = ["E1", "E3"]
+after = []
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/design.md#ports-and-adapters-编排",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#1-平台与核心领域",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "领域 Schema 与序列化合同"
+description = "定义并校验 release brief、evidence pack、scene plan、render manifest 和 run/review 状态的运行时 schema 与稳定序列化格式。"
+verify = "Schema 单测证明合法对象可 round-trip，缺字段、空 features 和非法状态会被拒绝并报告字段路径。"
+covers = ["E2"]
+after = [1]
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/design.md#领域合同",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#1-平台与核心领域",
+]
+
+[[entry]]
+id = 3
+type = "story"
+title = "文件化 Run Store"
+description = "实现按阶段持久化结构化产物、状态迁移和错误诊断的文件化 run store，并在失败时保留此前成功产物。"
+verify = "状态迁移与故障注入测试证明各阶段文件可追溯，失败 run 记录阶段和原因且不会删除已有产物。"
+covers = ["E4"]
+after = [2]
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/design.md#run-产物与状态",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#1-平台与核心领域",
+]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Provider Ports 与编排器"
+description = "定义可注入的 provider ports，并实现由 CLI 装配 adapters、按阶段驱动任务和传播失败诊断的核心编排器。"
+verify = "单测可替换每个 provider，mock 成功链路完成全部阶段，任一 provider 失败均写入正确失败阶段和原因。"
+covers = ["E3", "E4"]
+after = [3]
+hitl = false
+risk = "high"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/design.md#ports-and-adapters-编排",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#1-平台与核心领域",
+]
+
+[[entry]]
+id = 5
+type = "story"
+title = "核心骨架 Refactor Sweep"
+description = "在基础链路完成后统一整理模块边界、命名、公共测试夹具和错误类型，消除 tracer 演进留下的重复与泄漏。"
+verify = "build、typecheck、lint 和 test 全部通过，core 的依赖图中不存在具体外部 provider，且公共夹具没有重复定义。"
+covers = ["E1", "E2", "E3", "E4"]
+after = [1, 2, 3, 4]
+hitl = false
+risk = "low"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/design.md#模块边界",
+]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Core 端到端测试"
+description = "建立覆盖 mock CLI 成功路径和逐 provider 故障注入的跨模块端到端测试，锁定基础运行骨架的可追溯行为。"
+verify = "端到端测试验证成功 run 的完整产物集合，并逐一验证 provider 失败后的状态、诊断信息和已完成产物保留规则。"
+covers = ["E1", "E2", "E3", "E4"]
+after = [5]
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#1-平台与核心领域",
+  "openspec/changes/showcraft-release-video-mvp/design.md#run-产物与状态",
+]

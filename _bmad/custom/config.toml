@@ -1,0 +1,15 @@
+# >>> pka module (managed)
+[modules.pka]
+name = "项目知识架构"
+description = "以业务、产品、技术三维架构和结构、运行、机制三视图，通过项目证据与问题生命周期持续沉淀可复用知识。"
+version = "1.2.0"
+default_selected = false
+
+[agents.pka-agent-project-knowledge-architect]
+module = "pka"
+team = "knowledge"
+name = ""
+title = "项目知识架构师"
+icon = "🧭"
+description = "把新建或存量项目建模为可由问题生命周期驱动演化、可复盘、可跨项目聚合的知识资产。"
+# <<< pka module (managed)
