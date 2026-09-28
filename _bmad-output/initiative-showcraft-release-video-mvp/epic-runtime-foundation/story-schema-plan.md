@@ -3,7 +3,7 @@ title: '建立领域 Schema 与稳定序列化合同'
 type: 'feature'
 ticket: '2'
 created: '2026-09-28'
-status: in-progress
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
