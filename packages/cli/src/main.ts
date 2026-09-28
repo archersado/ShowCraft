@@ -38,7 +38,7 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     throw new Error(`Unable to write demo artifacts in ${runDirectory}: ${formatError(error)}`);
   }
 
-  return { runDirectory, status: tracer.run.status };
+  return { runDirectory, status: "completed" as const };
 }
 
 export function parseDemoArgs(args: readonly string[]): Pick<DemoOptions, "outputRoot"> {

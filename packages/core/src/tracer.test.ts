@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  releaseBriefSchema,
+  renderManifestSchema,
+  runRecordSchema,
+} from "./domain.js";
 import { createMockTracerResult } from "./tracer.js";
 
 describe("createMockTracerResult", () => {
@@ -14,8 +19,17 @@ describe("createMockTracerResult", () => {
     });
     expect(result.run).toEqual({
       format: "showcraft.mock-run/v1",
+      runId: "mock-tracer-demo",
       status: "completed",
       artifacts: ["release.json", "manifest.json"],
     });
+  });
+
+  it("conforms to the formal domain schemas", () => {
+    const result = createMockTracerResult();
+
+    expect(releaseBriefSchema.safeParse(result.release).success).toBe(true);
+    expect(renderManifestSchema.safeParse(result.manifest).success).toBe(true);
+    expect(runRecordSchema.safeParse(result.run).success).toBe(true);
   });
 });

@@ -1,42 +1,43 @@
-export type MockRelease = {
-  version: string;
-  source: string;
-  features: Array<{
-    id: string;
-    title: string;
-    narration: string;
-  }>;
-};
-
-export type MockManifest = {
-  format: "showcraft.mock-manifest/v1";
-  releaseVersion: string;
-  scenes: Array<{
-    id: string;
-    featureId: string;
-    title: string;
-    narration: string;
-  }>;
-};
-
-export type MockRun = {
-  format: "showcraft.mock-run/v1";
-  status: "completed";
-  artifacts: ["release.json", "manifest.json"];
-};
-
-export type MockTracerResult = {
-  release: MockRelease;
-  manifest: MockManifest;
-  run: MockRun;
-};
+import type {
+  ReleaseBrief,
+  RenderManifest,
+  RunRecord,
+  Scene,
+  ScenePlan,
+} from "./domain.js";
+import {
+  renderManifestSchema,
+  releaseBriefSchema,
+  runRecordSchema,
+  scenePlanSchema,
+} from "./domain.js";
 
 /**
- * A deliberately small, dependency-free tracer. Formal domain schemas and
- * provider orchestration are introduced by later stories.
+ * A deliberately small, dependency-light tracer. Its output now conforms to
+ * the formal domain schemas so downstream stories (run store, providers) can
+ * rely on the same contracts. Provider orchestration stays out.
  */
+
+export type MockTracerResult = {
+  release: ReleaseBrief;
+  manifest: RenderManifest;
+  run: RunRecord;
+};
+
+function buildScenePlan(release: ReleaseBrief): ScenePlan {
+  const scenes: Scene[] = release.features.map((feature) => ({
+    id: `scene-${feature.id}`,
+    featureId: feature.id,
+    title: feature.title,
+    narration: feature.narration,
+    narrationSource: "narration",
+    plannedDurationSeconds: 15,
+  }));
+  return { releaseVersion: release.version, scenes };
+}
+
 export function createMockTracerResult(): MockTracerResult {
-  const release: MockRelease = {
+  const release: ReleaseBrief = {
     version: "demo",
     source: "mock://showcraft/demo-release",
     features: [
@@ -48,24 +49,26 @@ export function createMockTracerResult(): MockTracerResult {
     ],
   };
 
-  const manifest: MockManifest = {
+  const scenePlan = buildScenePlan(release);
+
+  const manifest: RenderManifest = {
     format: "showcraft.mock-manifest/v1",
     releaseVersion: release.version,
-    scenes: release.features.map((feature) => ({
-      id: `scene-${feature.id}`,
-      featureId: feature.id,
-      title: feature.title,
-      narration: feature.narration,
-    })),
+    scenes: scenePlan.scenes,
   };
 
-  return {
-    release,
-    manifest,
-    run: {
-      format: "showcraft.mock-run/v1",
-      status: "completed",
-      artifacts: ["release.json", "manifest.json"],
-    },
+  const run: RunRecord = {
+    format: "showcraft.mock-run/v1",
+    runId: "mock-tracer-demo",
+    status: "completed",
+    artifacts: ["release.json", "manifest.json"],
   };
+
+  // Guard the contract at construction time; the mock data must always parse.
+  releaseBriefSchema.parse(release);
+  scenePlanSchema.parse(scenePlan);
+  renderManifestSchema.parse(manifest);
+  runRecordSchema.parse(run);
+
+  return { release, manifest, run };
 }

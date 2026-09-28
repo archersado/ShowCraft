@@ -3,7 +3,7 @@
 ## 1. 平台与核心领域
 
 - [x] 1.1 初始化 pnpm TypeScript workspace、共享 lint/test/typecheck 脚本和 run 目录忽略规则，并验证 `pnpm typecheck` 可执行
-- [ ] 1.2 定义 release brief、evidence pack、scene plan、render manifest、run/review 状态的 schema，并验证合法与非法输入单测通过
+- [x] 1.2 定义 release brief、evidence pack、scene plan、render manifest、run/review 状态的 schema，并验证合法与非法输入单测通过
 - [ ] 1.3 实现端口编排器及文件化 run 记录，并验证失败阶段保留已完成产物和诊断
 
 ## 2. 发布来源与代码证据
