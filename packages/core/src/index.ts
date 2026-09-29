@@ -71,3 +71,19 @@ export type { ReleaseSourcePort, RendererPort, ScenePlannerPort } from "./ports.
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
+
+export {
+  isSecretPath,
+  parseReleaseDocument,
+  parseReleaseSourceRef,
+  ReleaseSourceError,
+  validateLocalSource,
+} from "./releaseSource.js";
+
+export type {
+  GitHubSourceRef,
+  LocalSourceRef,
+  ParsedReleaseDocument,
+  ReleaseSection,
+  ReleaseSourceRef,
+} from "./releaseSource.js";
