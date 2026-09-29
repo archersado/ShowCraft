@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "archive-existing-project",
+      "input": "这周要把 FlowMart 交给新团队，请直接归档这个存量项目。材料在 fixtures/archive/，原文件只读；把项目知识写到 _bmad-output/project-knowledge/。业务、产品、技术都要按结构、运行、机制整理，机制要指出由哪些结构模块支撑哪些运行行为。不要先问我问题，证据不够就标 pending 或 inferred。",
+      "rubric": [
+        "_bmad-output/project-knowledge 下存在非空的 project-overview.md、sources.md、traceability.md，以及 business、product、technology 三个目录各自的 structure.md、runtime.md、mechanism.md；不得用 technical 代替 technology",
+        "sources.md 引用 requirements.md、order_service.py 和 ops-runbook.md 中至少两个真实来源路径",
+        "至少一个 mechanism.md 同时引用对应的结构模块与运行行为，并区分事实、inferred 或 pending",
+        "fixtures/archive 下所有输入文件保持字节不变"
+      ],
+      "files": [
+        "fixtures/archive/README.md",
+        "fixtures/archive/docs/requirements.md",
+        "fixtures/archive/src/order_service.py",
+        "fixtures/archive/deliverables/ops-runbook.md"
+      ]
+    },
+    {
+      "id": "cross-project-theme",
+      "input": "请从 fixtures/theme/hub/projects.yaml 登记的两个项目知识目录提炼『人工复核』主题，结果只写入 fixtures/theme/hub/themes/，不要回扫原始项目，也不要改写项目级知识。需要说明共同模式、差异、适用条件、反例、来源矩阵和置信度。直接执行。",
+      "rubric": [
+        "fixtures/theme/hub/themes 下生成非空主题文件并更新或创建索引",
+        "主题同时引用 alpha 和 beta 两个项目的标准化知识产物",
+        "主题包含共同模式、关键差异、适用条件、反例、来源矩阵、置信度和待验证问题",
+        "fixtures/theme/alpha 与 fixtures/theme/beta 下的输入文件保持字节不变，且未读取未登记的原始项目"
+      ],
+      "files": [
+        "fixtures/theme/hub/projects.yaml",
+        "fixtures/theme/alpha/project-knowledge/project-overview.md",
+        "fixtures/theme/alpha/project-knowledge/business/mechanism.md",
+        "fixtures/theme/alpha/project-knowledge/product/runtime.md",
+        "fixtures/theme/alpha/project-knowledge/retrospectives/2026-08.md",
+        "fixtures/theme/beta/project-knowledge/project-overview.md",
+        "fixtures/theme/beta/project-knowledge/business/mechanism.md",
+        "fixtures/theme/beta/project-knowledge/product/runtime.md",
+        "fixtures/theme/beta/project-knowledge/retrospectives/2026-08.md"
+      ]
+    },
+    {
+      "id": "evidence-audit",
+      "input": "审计 fixtures/audit/project-knowledge/ 的证据与溯源质量，把可直接安排修正的报告写到 audit-report.md。只报告问题，不自动修正文档；重点检查无来源结论、失效路径、把推断当事实，以及机制是否缺少结构模块或运行行为映射。",
+      "rubric": [
+        "audit-report.md 存在且每个发现包含位置、问题、证据状态、影响和最小修复建议",
+        "报告识别 sources.md 中不存在的路径与 business/mechanism.md 中缺失的结构模块映射",
+        "报告识别 project-overview.md 中没有来源支撑的百分比结论",
+        "fixtures/audit/project-knowledge 下的输入文件保持字节不变"
+      ],
+      "files": [
+        "fixtures/audit/project-knowledge/project-overview.md",
+        "fixtures/audit/project-knowledge/sources.md",
+        "fixtures/audit/project-knowledge/business/mechanism.md"
+      ]
+    },
+    {
+      "id": "question-driven-update",
+      "state_prefix": "[已完成前置探讨；用户已确认结论：订单取消默认自动处理，只有已发货或退款金额超过 5000 元的高风险订单才进入人工审核；被否决的备选方案是所有取消都人工审核。]",
+      "input": "直接把这次议题的已确认结论更新到 fixtures/question/project-knowledge/ 中受影响的业务、产品、技术架构和 traceability.md。不要扩大改写范围，不要修改 sources/ 下的原始决策记录。",
+      "rubric": [
+        "fixtures/question/project-knowledge/issues 下生成带 Q-ID 的单问题文件并更新 index.md；问题文件包含定义、分解、关联、Discussion、方案、架构更新和验证状态",
+        "business、product、technology 三个维度的受影响文档均体现默认自动、已发货或退款超过 5000 元转人工审核的已确认规则",
+        "每个被更新的 mechanism.md 同时指向具体结构模块和运行行为，不只是复述规则",
+        "traceability.md 记录问题、确认结论、被否决备选方案、受影响架构节点、未解项和更新日期，并连接业务规则、产品审核流程与技术规则/队列",
+        "fixtures/question/sources/decision.md 保持字节不变，且未受影响的 project-overview.md 不被改写"
+      ],
+      "files": [
+        "fixtures/question/project-knowledge/project-overview.md",
+        "fixtures/question/project-knowledge/traceability.md",
+        "fixtures/question/project-knowledge/business/structure.md",
+        "fixtures/question/project-knowledge/business/runtime.md",
+        "fixtures/question/project-knowledge/business/mechanism.md",
+        "fixtures/question/project-knowledge/product/structure.md",
+        "fixtures/question/project-knowledge/product/runtime.md",
+        "fixtures/question/project-knowledge/product/mechanism.md",
+        "fixtures/question/project-knowledge/technology/structure.md",
+        "fixtures/question/project-knowledge/technology/runtime.md",
+        "fixtures/question/project-knowledge/technology/mechanism.md",
+        "fixtures/question/sources/decision.md"
+      ]
+    }
+  ]
+}
