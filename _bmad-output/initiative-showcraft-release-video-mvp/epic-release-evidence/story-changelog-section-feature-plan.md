@@ -3,7 +3,7 @@ title: 'Changelog section 到 feature 映射'
 type: 'feature'
 ticket: '2'
 created: '2026-09-29'
-status: draft
+status: ready-for-dev
 route: 'full'
 route_source: 'auto'
 review: ''
