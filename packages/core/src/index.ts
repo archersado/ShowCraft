@@ -6,6 +6,7 @@ export {
   evidencePackSchema,
   evidenceReferenceSchema,
   featureIdSchema,
+  featureSourceRefSchema,
   narrationSourceSchema,
   releaseFeatureSchema,
   releaseBriefSchema,
@@ -30,6 +31,7 @@ export type {
   EvidenceEntry,
   EvidencePack,
   EvidenceReference,
+  FeatureSourceRef,
   ReleaseBrief,
   ReleaseFeature,
   ReleasePackage,
@@ -71,6 +73,8 @@ export type { ReleaseSourcePort, RendererPort, ScenePlannerPort } from "./ports.
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
+
+export { normalizeSectionsToFeatures, slugifyTitle } from "./releaseMapping.js";
 
 export {
   isSecretPath,
