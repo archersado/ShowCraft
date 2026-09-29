@@ -3,7 +3,7 @@ title: 'Core 端到端测试'
 type: 'feature'
 ticket: '6'
 created: '2026-09-29'
-status: ready-for-dev
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
