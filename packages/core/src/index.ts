@@ -71,6 +71,3 @@ export type { ReleaseSourcePort, RendererPort, ScenePlannerPort } from "./ports.
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
-
-export { createMockTracerResult } from "./tracer.js";
-export type { MockTracerResult } from "./tracer.js";

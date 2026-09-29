@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMockTracerResult, RunStoreCore } from "@showcraft/core";
+import { RunStoreCore } from "@showcraft/core";
+import { sampleManifest, sampleRelease } from "../../core/src/testing.js";
 
 import { runDemo } from "./main.js";
 import { createRunDirectory, persistRun, persistRunEvents } from "./runStore.js";
@@ -38,9 +39,8 @@ describe("persistRun", () => {
   it("writes staged artifacts and the run record to disk", async () => {
     const root = await makeTempRoot();
     const store = new RunStoreCore("run-persist");
-    const tracer = createMockTracerResult();
-    store.recordArtifact({ stage: "release", value: tracer.release });
-    store.recordArtifact({ stage: "manifest", value: tracer.manifest });
+    store.recordArtifact({ stage: "release", value: sampleRelease });
+    store.recordArtifact({ stage: "manifest", value: sampleManifest() });
     store.complete();
 
     const result = await persistRun(root, store);
@@ -55,15 +55,14 @@ describe("persistRun", () => {
     const root = await makeTempRoot();
     const runDirectory = await createRunDirectory(root, "run-fail");
     const store = new RunStoreCore("run-fail");
-    const tracer = createMockTracerResult();
-    store.recordArtifact({ stage: "release", value: tracer.release });
+    store.recordArtifact({ stage: "release", value: sampleRelease });
     await persistRunEvents(runDirectory, store.collectFiles());
 
     store.fail("manifest", "boom");
     await persistRunEvents(runDirectory, [store.collectFiles().at(-1)!]);
 
     const kept = JSON.parse(await readFile(join(runDirectory, "release.json"), "utf8"));
-    expect(kept.version).toBe(tracer.release.version);
+    expect(kept.version).toBe(sampleRelease.version);
     const record = JSON.parse(await readFile(join(runDirectory, "run.json"), "utf8"));
     expect(record.status).toBe("failed");
     expect(record.failure).toEqual({ stage: "manifest", reason: "boom" });

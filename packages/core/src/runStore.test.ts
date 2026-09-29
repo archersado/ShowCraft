@@ -6,36 +6,15 @@ import {
   RunStoreCore,
   runStageOrder,
   stageFileNames,
-  type RenderManifest,
-  type ReleaseBrief,
-  type ScenePlan,
 } from "./runStore.js";
+import {
+  sampleManifest,
+  sampleRelease as release,
+  sampleScenePlan,
+} from "./testing.js";
 
-const release: ReleaseBrief = {
-  version: "v0.3.3",
-  source: "mock://showcraft/demo-release",
-  features: [{ id: "perception-routing", title: "感知路由", narration: "感知路由讲解" }],
-};
-
-const scenePlan: ScenePlan = {
-  releaseVersion: release.version,
-  scenes: [
-    {
-      id: "scene-perception-routing",
-      featureId: "perception-routing",
-      title: "感知路由",
-      narration: "感知路由讲解",
-      narrationSource: "narration",
-      plannedDurationSeconds: 15,
-    },
-  ],
-};
-
-const manifest: RenderManifest = {
-  format: "showcraft.mock-manifest/v1",
-  releaseVersion: release.version,
-  scenes: scenePlan.scenes,
-};
+const scenePlan = sampleScenePlan(release);
+const manifest = sampleManifest(release, scenePlan);
 
 describe("RunStoreCore", () => {
   it("stages schema-validated artifacts and completes a run", () => {

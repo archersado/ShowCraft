@@ -2,38 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { releasePackageSchema } from "./domain.js";
 import { safeParseReleasePackage, stableJsonBytes, toStableJson } from "./serialization.js";
+import { sampleManifest, sampleRelease } from "./testing.js";
 
 const demoPackage = {
-  release: {
-    source: "mock://showcraft/demo-release",
-    version: "v0.3.3",
-    features: [
-      { id: "perception-routing", narration: "感知路由讲解", title: "感知路由" },
-      { id: "im-routing", narration: "IM 路由讲解", title: "IM 路由" },
-    ],
-  },
-  manifest: {
-    format: "showcraft.mock-manifest/v1",
-    releaseVersion: "v0.3.3",
-    scenes: [
-      {
-        id: "scene-perception-routing",
-        featureId: "perception-routing",
-        title: "感知路由",
-        narration: "感知路由讲解",
-        narrationSource: "narration",
-        plannedDurationSeconds: 15,
-      },
-      {
-        id: "scene-im-routing",
-        featureId: "im-routing",
-        title: "IM 路由",
-        narration: "IM 路由讲解",
-        narrationSource: "narration",
-        plannedDurationSeconds: 15,
-      },
-    ],
-  },
+  release: sampleRelease,
+  manifest: sampleManifest(),
   run: {
     format: "showcraft.mock-run/v1",
     runId: "run-1",

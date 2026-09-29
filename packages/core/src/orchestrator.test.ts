@@ -2,20 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { runPipeline } from "./orchestrator.js";
 import { RunStoreCore } from "./runStore.js";
-import {
-  createMockReleaseSource,
-  createMockRenderer,
-  createMockScenePlanner,
-} from "./ports.js";
-import type { PipelinePorts } from "./ports.js";
-
-function mockPorts(): PipelinePorts {
-  return {
-    releaseSource: createMockReleaseSource(),
-    scenePlanner: createMockScenePlanner(),
-    renderer: createMockRenderer(),
-  };
-}
+import { mockPorts } from "./testing.js";
 
 describe("runPipeline", () => {
   it("completes all stages with mock providers", async () => {

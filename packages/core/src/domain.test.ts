@@ -11,24 +11,11 @@ import {
   scenePlanSchema,
   validateReleasePackageRelations,
 } from "./domain.js";
+import { sampleRelease, sampleScene } from "./testing.js";
 
-const release = {
-  version: "v0.3.3",
-  source: "mock://showcraft/demo-release",
-  features: [
-    { id: "perception-routing", title: "感知路由", narration: "感知路由讲解" },
-    { id: "im-routing", title: "IM 路由", narration: "IM 路由讲解" },
-  ],
-};
+const release = sampleRelease;
 
-const scene = (featureId: string, id: string) => ({
-  id,
-  featureId,
-  title: "镜头标题",
-  narration: "镜头旁白",
-  narrationSource: "narration",
-  plannedDurationSeconds: 15,
-});
+const scene = sampleScene;
 
 describe("releaseBriefSchema", () => {
   it("accepts a release with at least one feature", () => {

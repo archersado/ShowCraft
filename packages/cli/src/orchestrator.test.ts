@@ -3,12 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { RunStoreCore, runPipeline } from "@showcraft/core";
 import {
   createMockReleaseSource,
   createMockScenePlanner,
-  RunStoreCore,
-  runPipeline,
-} from "@showcraft/core";
+} from "../../core/src/ports.js";
 
 import { runDemo } from "./main.js";
 import { createRunDirectory, persistRunEvents } from "./runStore.js";

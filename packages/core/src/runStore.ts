@@ -19,7 +19,7 @@ import { parseWithSchema, stableJsonBytes } from "./serialization.js";
  * the CLI adapter (packages/cli/src/runStore.ts).
  */
 
-/** Stages whose artifacts the mock tracer path persists today. */
+/** Stages whose artifacts the mock release pipeline persists today. */
 export type RunStage = "release" | "scenePlan" | "manifest";
 
 export const runStageOrder: readonly RunStage[] = ["release", "scenePlan", "manifest"];
