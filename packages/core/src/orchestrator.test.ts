@@ -76,6 +76,84 @@ describe("runPipeline", () => {
     expect(store.currentFailure?.reason).toContain("features");
   });
 
+  it("skips the evidence stage entirely when no codeEvidence port is provided", async () => {
+    const store = new RunStoreCore("orch-no-evidence");
+    await runPipeline(mockPorts(), store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual(["release.json", "scene.json", "manifest.json", "run.json"]);
+    expect(files).not.toContain("evidence.json");
+  });
+
+  it("records the evidence artifact between release and scenePlan when the port is provided", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = (release) => ({
+      pack: {
+        releaseVersion: release.version,
+        entries: [
+          {
+            id: "ev-1",
+            featureId: release.features[0]!.id,
+            kind: "commit",
+            reference: { location: "a".repeat(40) },
+            confidence: 0.5,
+          },
+        ],
+      },
+      entryPoints: [
+        {
+          id: `entry-${release.features[0]!.id}`,
+          featureId: release.features[0]!.id,
+          description: "入口候选",
+          confidence: 0.5,
+          evidenceIds: ["ev-1"],
+        },
+      ],
+    });
+    const store = new RunStoreCore("orch-evidence");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual([
+      "release.json",
+      "evidence.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("attributes an evidence port failure to the evidence stage, keeping release artifacts", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = () => {
+      throw new Error("git repo corrupted");
+    };
+    const store = new RunStoreCore("orch-evidence-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("evidence");
+    expect(store.currentFailure?.reason).toContain("git repo corrupted");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual(["release.json", "run.json"]);
+  });
+
+  it("rejects evidence output failing its schema via stage failure", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = () => ({
+      pack: { releaseVersion: "", entries: [] },
+      entryPoints: [],
+    });
+    const store = new RunStoreCore("orch-evidence-invalid");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("evidence");
+    // Cross-artifact version consistency stays with validateReleasePackageRelations.
+  });
+
   it("accepts fully custom fake providers without core changes", async () => {
     const ports: PipelinePorts = {
       releaseSource: () => ({

@@ -1,7 +1,7 @@
 import type { ReleaseBrief, RenderManifest } from "./domain.js";
 import type { RunStage } from "./runStore.js";
 import { RunStoreCore } from "./runStore.js";
-import type { RendererPort, ReleaseSourcePort, ScenePlannerPort } from "./ports.js";
+import type { CodeEvidencePort, RendererPort, ReleaseSourcePort, ScenePlannerPort } from "./ports.js";
 
 /**
  * Stage-driven orchestration over provider ports. Each stage's artifact goes
@@ -14,10 +14,13 @@ export type PipelinePorts = {
   releaseSource: ReleaseSourcePort;
   scenePlanner: ScenePlannerPort;
   renderer: RendererPort;
+  /** Optional: when absent the evidence stage is skipped entirely (mock runs
+   * keep their exact Story 1.6 artifact set). */
+  codeEvidence?: CodeEvidencePort;
 };
 
 /** Tracks how far the pipeline progressed for accurate failure attribution. */
-type StageProgress = "release" | "scenePlan" | "manifest" | "completed";
+type StageProgress = "release" | "evidence" | "scenePlan" | "manifest" | "completed";
 
 export class StageFailure extends Error {
   constructor(
@@ -29,7 +32,7 @@ export class StageFailure extends Error {
   }
 }
 
-/** Run the mock release pipeline to completion; returns the finished store. */
+/** Run the release pipeline to completion; returns the finished store. */
 export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Promise<RunStoreCore> {
   let progress: StageProgress = "release";
   let release: ReleaseBrief | undefined;
@@ -37,6 +40,12 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
   try {
     release = await ports.releaseSource();
     store.recordArtifact({ stage: "release", value: release });
+
+    if (ports.codeEvidence) {
+      progress = "evidence";
+      const evidence = await ports.codeEvidence(release);
+      store.recordArtifact({ stage: "evidence", value: evidence });
+    }
 
     progress = "scenePlan";
     const scenePlan = await ports.scenePlanner(release);
