@@ -41,11 +41,35 @@ export const narrationSourceSchema = z.enum(["narration", "human_supplement", "f
 // Release brief
 // ---------------------------------------------------------------------------
 
-export const releaseFeatureSchema = z.object({
-  id: featureIdSchema,
-  title: z.string().min(1, "feature title must not be empty"),
-  narration: z.string().min(1, "feature narration must not be empty"),
-});
+/**
+ * Feature-level provenance mapping back to one `##` section of the parsed
+ * release document. Either fully present (features derived from a parsed
+ * source) or absent (built-in mock / hand-written briefs) — never partial.
+ */
+export const featureSourceRefSchema = z
+  .object({
+    /** 1-based ordinal of the `##` section within the document. */
+    sectionIndex: z.number().int().min(1, "sectionIndex must be >= 1"),
+    /** Original section heading text, kept human-readable verbatim. */
+    sectionTitle: z.string().min(1, "sectionTitle must not be empty"),
+    /** Inclusive line range of the section in the source document. */
+    startLine: z.number().int().min(1, "startLine must be >= 1"),
+    endLine: z.number().int().min(1, "endLine must be >= 1"),
+  })
+  .strict()
+  .refine((ref) => ref.endLine >= ref.startLine, {
+    message: "endLine must be >= startLine",
+    path: ["endLine"],
+  });
+
+export const releaseFeatureSchema = z
+  .object({
+    id: featureIdSchema,
+    title: z.string().min(1, "feature title must not be empty"),
+    narration: z.string().min(1, "feature narration must not be empty"),
+    sourceRef: featureSourceRefSchema.optional(),
+  })
+  .strict();
 
 export const releaseBriefSchema = z
   .object({
@@ -57,6 +81,7 @@ export const releaseBriefSchema = z
   })
   .strict();
 
+export type FeatureSourceRef = z.infer<typeof featureSourceRefSchema>;
 export type ReleaseFeature = z.infer<typeof releaseFeatureSchema>;
 export type ReleaseBrief = z.infer<typeof releaseBriefSchema>;
 export type RunStatus = z.infer<typeof runStatusSchema>;

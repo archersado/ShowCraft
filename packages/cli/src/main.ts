@@ -8,6 +8,7 @@ import {
   createMockReleaseSource,
   createMockRenderer,
   createMockScenePlanner,
+  normalizeSectionsToFeatures,
   parseReleaseDocument,
   parseReleaseSourceRef,
   releaseBriefSchema,
@@ -68,9 +69,9 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
 
 /**
  * Build a release source port from a local Markdown file. The path is
- * validated by the core security rules before its content is read; parsing
- * sections into features is story 2.2 — here every section becomes one
- * placeholder feature so the existing pipeline still runs end to end.
+ * validated by the core security rules before its content is read; sections
+ * are normalized into features (with sourceRef provenance) by the core
+ * mapping shared with the rest of the pipeline.
  */
 async function createFileReleaseSource(
   rawSource: string,
@@ -105,11 +106,7 @@ async function createFileReleaseSource(
       version,
       source: absolutePath,
       sourceDigest,
-      features: document.sections.map((section, index) => ({
-        id: `section-${index + 1}-${slugify(section.title)}`,
-        title: section.title,
-        narration: section.bullets.join("；") || section.title,
-      })),
+      features: normalizeSectionsToFeatures(document.sections),
     };
     return releaseBriefSchema.parse(brief);
   };
@@ -122,14 +119,6 @@ async function statSource(path: string): Promise<{ exists: boolean; isDirectory:
   } catch {
     return { exists: false, isDirectory: false };
   }
-}
-
-function slugify(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "section";
 }
 
 export function parseDemoArgs(

@@ -32,6 +32,8 @@ describe("runDemo with --source", () => {
     const release = JSON.parse(await readFile(join(result.runDirectory, "release.json"), "utf8"));
     expect(release.version).toBe("demo");
     expect(release.source).toBe("mock://showcraft/demo-release");
+    // Mock features carry no provenance mapping.
+    expect(release.features[0]?.sourceRef).toBeUndefined();
     expect((await readdir(result.runDirectory)).sort()).toEqual(
       ["manifest.json", "release.json", "run.json", "scene.json"].sort(),
     );
@@ -58,6 +60,29 @@ describe("runDemo with --source", () => {
     ]);
     // Every feature stays linkable back to its section id.
     expect(release.features[0]?.id).toBe("section-1-im");
+    expect(release.features.map((feature: { id: string }) => feature.id)).toEqual([
+      "section-1-im",
+      "section-2-section",
+      "section-3-agent",
+      "section-4-section",
+    ]);
+    // Each feature's sourceRef maps 1:1 back to its `##` section heading and
+    // line range in the source document (v0.3.3: sections at 5–11/12–17/18–23/24–29).
+    const expectedSections: Array<[string, number, number]> = [
+      ["感知与 IM 路由", 5, 11],
+      ["企业微信办公能力", 12, 17],
+      ["Agent 与任务协作", 18, 23],
+      ["验证", 24, 29],
+    ];
+    expectedSections.forEach(([sectionTitle, startLine, endLine], index) => {
+      const sourceRef = release.features[index]?.sourceRef;
+      expect(sourceRef).toEqual({
+        sectionIndex: index + 1,
+        sectionTitle,
+        startLine,
+        endLine,
+      });
+    });
   });
 
   it("rejects a directory as release source", async () => {
