@@ -48,6 +48,88 @@ describe("releaseBriefSchema", () => {
       DomainValidationError,
     );
   });
+
+  it("accepts a feature carrying a valid sourceRef", () => {
+    const result = releaseBriefSchema.safeParse({
+      ...release,
+      features: [
+        {
+          id: "section-1-im",
+          title: "感知与 IM 路由",
+          narration: "感知与 IM 路由讲解",
+          sourceRef: { sectionIndex: 1, sectionTitle: "感知与 IM 路由", startLine: 5, endLine: 11 },
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.features[0]?.sourceRef).toEqual({
+        sectionIndex: 1,
+        sectionTitle: "感知与 IM 路由",
+        startLine: 5,
+        endLine: 11,
+      });
+    }
+  });
+
+  it("still accepts features without sourceRef (mock / hand-written briefs)", () => {
+    const result = releaseBriefSchema.safeParse(release);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.features.every((feature) => feature.sourceRef === undefined)).toBe(true);
+    }
+  });
+
+  it("rejects unknown keys on a feature (strict schema)", () => {
+    const result = releaseBriefSchema.safeParse({
+      ...release,
+      features: [{ ...release.features[0], provenance: "unknown" }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join(".") === "features.0")).toBe(true);
+    }
+  });
+
+  it("rejects a sourceRef whose endLine precedes its startLine", () => {
+    const result = releaseBriefSchema.safeParse({
+      ...release,
+      features: [
+        {
+          id: "section-1-im",
+          title: "感知与 IM 路由",
+          narration: "感知与 IM 路由讲解",
+          sourceRef: { sectionIndex: 1, sectionTitle: "感知与 IM 路由", startLine: 11, endLine: 5 },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) => issue.path.join(".") === "features.0.sourceRef.endLine"),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a sourceRef with a non-positive line number", () => {
+    const result = releaseBriefSchema.safeParse({
+      ...release,
+      features: [
+        {
+          id: "section-1-im",
+          title: "感知与 IM 路由",
+          narration: "感知与 IM 路由讲解",
+          sourceRef: { sectionIndex: 1, sectionTitle: "感知与 IM 路由", startLine: 0, endLine: 5 },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) => issue.path.join(".") === "features.0.sourceRef.startLine"),
+      ).toBe(true);
+    }
+  });
 });
 
 describe("evidencePackSchema", () => {

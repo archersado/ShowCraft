@@ -12,16 +12,25 @@ import {
   sampleRelease as release,
   sampleScenePlan,
 } from "./testing.js";
+import type { EvidencePack } from "./domain.js";
 
 const scenePlan = sampleScenePlan(release);
 const manifest = sampleManifest(release, scenePlan);
 
+const evidencePack: EvidencePack = { releaseVersion: release.version, entries: [] };
+
 describe("RunStoreCore", () => {
   it("stages schema-validated artifacts and completes a run", () => {
     const store = new RunStoreCore("run-ok");
-    for (const stage of runStageOrder) {
+    for (const stage of ["release", "evidence", "scenePlan", "manifest"] as const) {
       const artifact =
-        stage === "release" ? release : stage === "scenePlan" ? scenePlan : manifest;
+        stage === "release"
+          ? release
+          : stage === "evidence"
+            ? { pack: evidencePack, entryPoints: [] }
+            : stage === "scenePlan"
+              ? scenePlan
+              : manifest;
       store.recordArtifact({ stage, value: artifact });
     }
     store.complete();
@@ -30,13 +39,69 @@ describe("RunStoreCore", () => {
     const files = store.collectFiles();
     expect(files.map((file) => file.fileName)).toEqual([
       "release.json",
+      "evidence.json",
       "scene.json",
       "manifest.json",
       "run.json",
     ]);
-    const record = JSON.parse(new TextDecoder().decode(files[3]?.bytes));
+    const record = JSON.parse(new TextDecoder().decode(files[4]?.bytes));
     expect(record).toMatchObject({ runId: "run-ok", status: "completed" });
-    expect(record.artifacts).toEqual(["release.json", "scene.json", "manifest.json"]);
+    expect(record.artifacts).toEqual([
+      "release.json",
+      "evidence.json",
+      "scene.json",
+      "manifest.json",
+    ]);
+  });
+
+  it("stages evidence packs with entry points into a single evidence.json", () => {
+    const store = new RunStoreCore("run-evidence");
+    const event = store.recordArtifact({
+      stage: "evidence",
+      value: {
+        pack: {
+          releaseVersion: "v0.3.3",
+          entries: [
+            {
+              id: "ev-1",
+              featureId: "f1",
+              kind: "commit",
+              reference: { location: "a".repeat(40) },
+              confidence: 0.5,
+            },
+          ],
+        },
+        entryPoints: [
+          {
+            id: "entry-f1",
+            featureId: "f1",
+            description: "入口",
+            confidence: 0.5,
+            evidenceIds: ["ev-1"],
+          },
+        ],
+      },
+    });
+
+    expect(event.file.fileName).toBe("evidence.json");
+    const parsed = JSON.parse(new TextDecoder().decode(event.file.bytes));
+    expect(parsed.releaseVersion).toBe("v0.3.3");
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entryPoints).toHaveLength(1);
+  });
+
+  it("rejects evidence artifacts that fail their schema without staging anything", () => {
+    const store = new RunStoreCore("run-bad-evidence");
+    expect(() =>
+      store.recordArtifact({
+        stage: "evidence",
+        value: {
+          pack: { releaseVersion: "", entries: [] },
+          entryPoints: [],
+        },
+      }),
+    ).toThrow(DomainValidationError);
+    expect(store.collectFiles().some((file) => file.fileName === "evidence.json")).toBe(false);
   });
 
   it("rejects artifacts that fail their schema without staging anything", () => {
@@ -95,7 +160,8 @@ describe("RunStoreCore", () => {
   });
 
   it("exposes stable stage ordering and file names", () => {
-    expect(runStageOrder).toEqual(["release", "scenePlan", "manifest"]);
+    expect(runStageOrder).toEqual(["release", "evidence", "scenePlan", "manifest"]);
     expect(stageFileNames.release).toBe("release.json");
+    expect(stageFileNames.evidence).toBe("evidence.json");
   });
 });

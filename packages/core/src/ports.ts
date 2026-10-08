@@ -1,4 +1,10 @@
-import type { ReleaseBrief, RenderManifest, ScenePlan } from "./domain.js";
+import type {
+  EntryPointCandidate,
+  EvidencePack,
+  ReleaseBrief,
+  RenderManifest,
+  ScenePlan,
+} from "./domain.js";
 
 /**
  * Provider ports for the mock release pipeline. Ports are plain function
@@ -15,6 +21,23 @@ export type RendererPort = (
   release: ReleaseBrief,
   scenePlan: ScenePlan,
 ) => Promise<RenderManifest> | RenderManifest;
+
+export type EvidenceResult = {
+  pack: EvidencePack;
+  entryPoints: EntryPointCandidate[];
+};
+
+/**
+ * Optional evidence port: retrieve code evidence for a release's features
+ * from an allowed Git repository. Returning empty entries is the explicit
+ * "no evidence source" outcome; throwing fails the evidence stage.
+ */
+export type CodeEvidencePort = (release: ReleaseBrief) => Promise<EvidenceResult> | EvidenceResult;
+
+/** Empty evidence pack for releases without a code evidence source. */
+export function createMockCodeEvidence(): CodeEvidencePort {
+  return (release) => ({ pack: { releaseVersion: release.version, entries: [] }, entryPoints: [] });
+}
 
 const MOCK_RELEASE: ReleaseBrief = {
   version: "demo",

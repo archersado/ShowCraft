@@ -1,9 +1,13 @@
 import {
   DomainValidationError,
+  entryPointCandidateSchema,
+  evidencePackSchema,
   releaseBriefSchema,
   renderManifestSchema,
   runRecordSchema,
   scenePlanSchema,
+  type EntryPointCandidate,
+  type EvidencePack,
   type ReleaseBrief,
   type RenderManifest,
   type RunRecord,
@@ -19,13 +23,15 @@ import { parseWithSchema, stableJsonBytes } from "./serialization.js";
  * the CLI adapter (packages/cli/src/runStore.ts).
  */
 
-/** Stages whose artifacts the mock release pipeline persists today. */
-export type RunStage = "release" | "scenePlan" | "manifest";
+/** Stages whose artifacts the release pipeline persists. Evidence runs only
+ * when a CodeEvidencePort is provided; the mock pipeline skips it. */
+export type RunStage = "release" | "evidence" | "scenePlan" | "manifest";
 
-export const runStageOrder: readonly RunStage[] = ["release", "scenePlan", "manifest"];
+export const runStageOrder: readonly RunStage[] = ["release", "evidence", "scenePlan", "manifest"];
 
 export const stageFileNames: Record<RunStage, string> = {
   release: "release.json",
+  evidence: "evidence.json",
   scenePlan: "scene.json",
   manifest: "manifest.json",
 };
@@ -68,6 +74,7 @@ const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
 /** A schema-validated artifact awaiting persistence, tagged by stage. */
 export type StageArtifact =
   | { stage: "release"; value: ReleaseBrief }
+  | { stage: "evidence"; value: { pack: EvidencePack; entryPoints: EntryPointCandidate[] } }
   | { stage: "scenePlan"; value: ScenePlan }
   | { stage: "manifest"; value: RenderManifest };
 
@@ -123,6 +130,17 @@ export class RunStoreCore {
       if (!result.success) {
         throw new DomainValidationError(result.issues);
       }
+    } else if (artifact.stage === "evidence") {
+      const result = parseWithSchema(evidencePackChecker, artifact.value.pack);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
+      for (const candidate of artifact.value.entryPoints) {
+        const candidateResult = parseWithSchema(entryPointChecker, candidate);
+        if (!candidateResult.success) {
+          throw new DomainValidationError(candidateResult.issues);
+        }
+      }
     } else if (artifact.stage === "scenePlan") {
       const result = parseWithSchema(scenePlanChecker, artifact.value);
       if (!result.success) {
@@ -137,7 +155,12 @@ export class RunStoreCore {
 
     const file: RunStoreFile = {
       fileName: stageFileNames[artifact.stage],
-      bytes: stableJsonBytes(artifact.value),
+      // The evidence artifact persists as its pack plus entry-point list;
+      // entryPoints are keyed inside the file for single-file round trips.
+      bytes:
+        artifact.stage === "evidence"
+          ? stableJsonBytes({ ...artifact.value.pack, entryPoints: artifact.value.entryPoints })
+          : stableJsonBytes(artifact.value),
     };
     this.pendingFiles.push(file);
     if (this.status === "pending") {
@@ -176,5 +199,7 @@ export class RunStoreCore {
 }
 
 const releaseBriefChecker = releaseBriefSchema;
+const evidencePackChecker = evidencePackSchema;
+const entryPointChecker = entryPointCandidateSchema;
 const scenePlanChecker = scenePlanSchema;
 const manifestChecker = renderManifestSchema;
