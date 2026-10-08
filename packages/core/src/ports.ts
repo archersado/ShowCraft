@@ -1,6 +1,7 @@
 import type {
   EntryPointCandidate,
   EvidencePack,
+  GateResult,
   ReleaseBrief,
   RenderManifest,
   ScenePlan,
@@ -15,7 +16,21 @@ import type {
 
 export type ReleaseSourcePort = () => Promise<ReleaseBrief> | ReleaseBrief;
 
-export type ScenePlannerPort = (release: ReleaseBrief) => Promise<ScenePlan> | ScenePlan;
+/**
+ * What the scene planner knows about the confidence gate's outcome. When a
+ * gate ran, `gatedFeatureIds` carries every feature the gate marked
+ * not-automatable so the planner can narrate a downgrade for them
+ * (`narrationSource: "fallback"`). Absent when no gate ran — planners keep
+ * their pre-gate behavior in that case.
+ */
+export type ScenePlanningContext = {
+  gatedFeatureIds?: ReadonlySet<string>;
+};
+
+export type ScenePlannerPort = (
+  release: ReleaseBrief,
+  context?: ScenePlanningContext,
+) => Promise<ScenePlan> | ScenePlan;
 
 export type RendererPort = (
   release: ReleaseBrief,
@@ -33,6 +48,17 @@ export type EvidenceResult = {
  * "no evidence source" outcome; throwing fails the evidence stage.
  */
 export type CodeEvidencePort = (release: ReleaseBrief) => Promise<EvidenceResult> | EvidenceResult;
+
+/**
+ * Optional gate port: classify each feature's entry-point candidates against
+ * the confidence threshold. Implementations wrap the core pure function
+ * `applyConfidenceGate`; the orchestrator runs the gate stage only when this
+ * port is provided (mock pipelines keep their exact pre-gate artifact set).
+ */
+export type ConfidenceGatePort = (
+  release: ReleaseBrief,
+  evidence: EvidenceResult,
+) => Promise<GateResult> | GateResult;
 
 /** Empty evidence pack for releases without a code evidence source. */
 export function createMockCodeEvidence(): CodeEvidencePort {
@@ -56,17 +82,20 @@ export function createMockReleaseSource(): ReleaseSourcePort {
 }
 
 export function createMockScenePlanner(): ScenePlannerPort {
-  return (release) => ({
-    releaseVersion: release.version,
-    scenes: release.features.map((feature) => ({
-      id: `scene-${feature.id}`,
-      featureId: feature.id,
-      title: feature.title,
-      narration: feature.narration,
-      narrationSource: "narration",
-      plannedDurationSeconds: 15,
-    })),
-  });
+  return (release, context) => {
+    const gated = context?.gatedFeatureIds;
+    return {
+      releaseVersion: release.version,
+      scenes: release.features.map((feature) => ({
+        id: `scene-${feature.id}`,
+        featureId: feature.id,
+        title: feature.title,
+        narration: feature.narration,
+        narrationSource: gated?.has(feature.id) ? ("fallback" as const) : ("narration" as const),
+        plannedDurationSeconds: 15,
+      })),
+    };
+  };
 }
 
 export function createMockRenderer(): RendererPort {

@@ -4,6 +4,7 @@ import {
   DomainValidationError,
   entryPointCandidateSchema,
   evidencePackSchema,
+  gateResultSchema,
   releaseBriefSchema,
   renderManifestSchema,
   reviewDecisionSchema,
@@ -276,4 +277,152 @@ describe("releasePackageSchema relations", () => {
     );
   });
 
+});
+
+describe("gateResultSchema and gate ↔ scenePlan relations", () => {
+  const scene = (featureId: string, id: string, narrationSource: "narration" | "fallback" | "human_supplement" = "narration") => ({
+    ...sampleScene(featureId, id),
+    narrationSource,
+  });
+
+  const gateFor = (
+    releaseVersion: string,
+    decisions: Array<{ featureId: string; reason: "no_evidence" | "below_threshold" | "eligible"; automatable: boolean; confidence?: number; evidenceIds: string[] }>,
+  ) => ({ releaseVersion, threshold: 0.8, decisions });
+
+  const scenePlanFor = (scenes: ReturnType<typeof scene>[]) => ({
+    releaseVersion: release.version,
+    scenes,
+  });
+
+  it("accepts a gate result whose decisions match the scene plan narration sources", () => {
+    const pkg = {
+      release,
+      gate: gateFor(release.version, [
+        { featureId: "perception-routing", reason: "eligible", automatable: true, confidence: 0.9, evidenceIds: ["ev-1"] },
+        { featureId: "im-routing", reason: "no_evidence", automatable: false, evidenceIds: [] },
+      ]),
+      scenePlan: scenePlanFor([
+        scene("perception-routing", "scene-1", "narration"),
+        scene("im-routing", "scene-2", "fallback"),
+      ]),
+    };
+    expect(gateResultSchema.safeParse(pkg.gate).success).toBe(true);
+    expect(() => validateReleasePackageRelations(pkg)).not.toThrow();
+  });
+
+  it("rejects a gated feature whose scene still claims narration source", () => {
+    const pkg = {
+      release,
+      gate: gateFor(release.version, [
+        { featureId: "perception-routing", reason: "no_evidence", automatable: false, evidenceIds: [] },
+      ]),
+      scenePlan: scenePlanFor([scene("perception-routing", "scene-1", "narration")]),
+    };
+    try {
+      validateReleasePackageRelations(pkg);
+      expect.unreachable("expected DomainValidationError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DomainValidationError);
+      expect((error as DomainValidationError).issues[0]?.path).toBe(
+        "scenePlan.scenes[id=scene-1].narrationSource",
+      );
+      expect((error as Error).message).toContain("perception-routing");
+      expect((error as Error).message).toContain("fallback");
+    }
+  });
+
+  it("rejects an eligible feature whose scene was downgraded to fallback", () => {
+    const pkg = {
+      release,
+      gate: gateFor(release.version, [
+        { featureId: "perception-routing", reason: "eligible", automatable: true, confidence: 0.9, evidenceIds: ["ev-1"] },
+      ]),
+      scenePlan: scenePlanFor([scene("perception-routing", "scene-1", "fallback")]),
+    };
+    expect(() => validateReleasePackageRelations(pkg)).toThrow(
+      /narrationSource must be "narration", got "fallback"/,
+    );
+  });
+
+  it("rejects a gate decision referencing an unknown feature", () => {
+    const pkg = {
+      release,
+      gate: gateFor(release.version, [
+        { featureId: "ghost-feature", reason: "no_evidence", automatable: false, evidenceIds: [] },
+      ]),
+    };
+    expect(() => validateReleasePackageRelations(pkg)).toThrow(
+      /unknown featureId "ghost-feature"/,
+    );
+  });
+
+  it("rejects a gate decision with no matching scene in the plan", () => {
+    const pkg = {
+      release,
+      gate: gateFor(release.version, [
+        { featureId: "im-routing", reason: "no_evidence", automatable: false, evidenceIds: [] },
+      ]),
+      scenePlan: scenePlanFor([scene("perception-routing", "scene-1", "fallback")]),
+    };
+    expect(() => validateReleasePackageRelations(pkg)).toThrow(
+      /has no scene in the scene plan/,
+    );
+  });
+
+  it("rejects a gate release version mismatch", () => {
+    const pkg = {
+      release,
+      gate: gateFor("v9.9.9", [
+        { featureId: "perception-routing", reason: "no_evidence", automatable: false, evidenceIds: [] },
+      ]),
+    };
+    expect(() => validateReleasePackageRelations(pkg)).toThrow(
+      /does not match release version/,
+    );
+  });
+
+  it("rejects an eligible decision that cites no evidence", () => {
+    const result = gateResultSchema.safeParse(
+      gateFor(release.version, [
+        { featureId: "perception-routing", reason: "eligible", automatable: true, confidence: 0.9, evidenceIds: [] },
+      ]),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) => issue.path.join(".").endsWith(".evidenceIds")),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a no_evidence decision that carries evidence references or a confidence", () => {
+    const withEvidence = gateResultSchema.safeParse(
+      gateFor(release.version, [
+        { featureId: "perception-routing", reason: "no_evidence", automatable: false, evidenceIds: ["ev-1"] },
+      ]),
+    );
+    expect(withEvidence.success).toBe(false);
+
+    const withConfidence = gateResultSchema.safeParse(
+      gateFor(release.version, [
+        { featureId: "perception-routing", reason: "no_evidence", automatable: false, confidence: 0.5, evidenceIds: [] },
+      ]),
+    );
+    expect(withConfidence.success).toBe(false);
+  });
+
+  it("rejects a below_threshold decision carrying no confidence", () => {
+    const result = gateResultSchema.safeParse(
+      gateFor(release.version, [
+        { featureId: "perception-routing", reason: "below_threshold", automatable: false, evidenceIds: ["ev-1"] },
+      ]),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) => issue.path.join(".").endsWith(".confidence")),
+      ).toBe(true);
+    }
+  });
 });
