@@ -3,7 +3,7 @@ title: '只读 Git 证据检索与置信度'
 type: 'feature'
 ticket: '3'
 created: '2026-09-29'
-status: ready-for-dev
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
