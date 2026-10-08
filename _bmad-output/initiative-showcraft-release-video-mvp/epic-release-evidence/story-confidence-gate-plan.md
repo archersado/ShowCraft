@@ -3,7 +3,7 @@ title: '低置信度门禁与人工补充输出'
 type: 'feature'
 ticket: '4'
 created: '2026-10-08'
-status: draft
+status: ready-for-dev
 route: 'full'
 route_source: 'auto'
 review: ''
