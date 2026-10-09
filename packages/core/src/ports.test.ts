@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createMockScenePlanner } from "./ports.js";
+import { createMockScenePlanner, DesktopRunnerError } from "./ports.js";
+import type { DesktopRunnerPort } from "./ports.js";
 import { mockPorts } from "./testing.js";
 import { runPipeline } from "./orchestrator.js";
 import { RunStoreCore } from "./runStore.js";
@@ -72,5 +73,31 @@ describe("createMockScenePlanner with gate context", () => {
     const plan = JSON.parse(new TextDecoder().decode(sceneBytes));
     expect(plan.scenes).toHaveLength(1);
     expect(plan.scenes[0]?.narrationSource).toBe("fallback");
+  });
+});
+
+/**
+ * Story 3.1 desktop runner port contract: a plain fake must satisfy the port
+ * shape, and `DesktopRunnerError` must carry its phase + diagnostics fields
+ * readable (they are the structured surface orchestrator integration in 3.2
+ * maps to StageFailure).
+ */
+describe("DesktopRunnerPort contract", () => {
+  it("accepts a fake runner implementation and exposes its start info", async () => {
+    const runner: DesktopRunnerPort = {
+      start: async () => ({ rendererUrl: "http://localhost:3100" }),
+      stop: async () => {},
+    };
+    await expect(runner.start()).resolves.toEqual({ rendererUrl: "http://localhost:3100" });
+    await expect(runner.stop()).resolves.toBeUndefined();
+  });
+
+  it("keeps DesktopRunnerError phase and diagnostics readable", () => {
+    const error = new DesktopRunnerError("readiness", "phase=readiness\nelapsed_ms=1200", "not ready");
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("DesktopRunnerError");
+    expect(error.phase).toBe("readiness");
+    expect(error.diagnostics).toBe("phase=readiness\nelapsed_ms=1200");
+    expect(error.message).toBe("not ready");
   });
 });

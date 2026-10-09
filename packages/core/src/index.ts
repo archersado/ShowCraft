@@ -79,12 +79,17 @@ export {
 export type {
   CodeEvidencePort,
   ConfidenceGatePort,
+  DesktopRunnerPort,
+  DesktopStartInfo,
   EvidenceResult,
   ReleaseSourcePort,
   RendererPort,
   ScenePlanningContext,
   ScenePlannerPort,
 } from "./ports.js";
+
+export { DesktopRunnerError } from "./ports.js";
+export type { DesktopRunnerErrorPhase } from "./ports.js";
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";

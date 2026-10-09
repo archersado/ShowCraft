@@ -37,6 +37,50 @@ export type RendererPort = (
   scenePlan: ScenePlan,
 ) => Promise<RenderManifest> | RenderManifest;
 
+/**
+ * Lifecycle outcome of a successful desktop `start()`: the app is ready to be
+ * driven (renderer serving HTTP, Electron main process alive) and `rendererUrl`
+ * is the address the readiness gate confirmed.
+ */
+export type DesktopStartInfo = {
+  rendererUrl: string;
+};
+
+/**
+ * Desktop runner lifecycle port (epic 3). `start()` resolves only once the
+ * desktop app is ready — readiness is the success condition, not a separate
+ * check — and rejects only after the spawned process tree has been fully
+ * reclaimed (zero leftover processes). `stop()` is an idempotent, whole
+ * process-group shutdown: calling it before start, after stop, or after the
+ * app exited on its own is a success no-op. Demo-action execution stays out of
+ * this contract for now (story 3.2).
+ */
+export type DesktopRunnerPort = {
+  start(): Promise<DesktopStartInfo>;
+  stop(): Promise<void>;
+};
+
+/** The lifecycle stage a `DesktopRunnerError` was raised in. */
+export type DesktopRunnerErrorPhase = "precondition" | "spawn" | "readiness" | "stop";
+
+/**
+ * Error contract for desktop lifecycle failures. `phase` maps each failure to
+ * its pipeline stage (so orchestrator integration in 3.2 can surface it as a
+ * StageFailure without re-deriving), and `diagnostics` is a human-readable
+ * multiline report: elapsed time, renderer URL, output tail excerpts and —
+ * where relevant — a process-group snapshot.
+ */
+export class DesktopRunnerError extends Error {
+  constructor(
+    readonly phase: DesktopRunnerErrorPhase,
+    readonly diagnostics: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "DesktopRunnerError";
+  }
+}
+
 export type EvidenceResult = {
   pack: EvidencePack;
   entryPoints: EntryPointCandidate[];
