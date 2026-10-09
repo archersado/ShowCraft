@@ -280,6 +280,7 @@ export function createStartUpOSDesktopRunner(
       `elapsed_ms=${session ? Date.now() - session.startedAt : 0}`,
       `renderer_url=${rendererUrl}`,
       ...Object.entries(extras).map(([key, value]) => `${key}=${value}`),
+      `detail=${message}`,
     ];
     if (session) {
       lines.push("--- stdout tail ---", tailExcerpt(session.stdout.text(), 2048) || "(empty)");
@@ -373,6 +374,14 @@ export function createStartUpOSDesktopRunner(
       );
 
       const pgid = child.pid ?? -1;
+      const describeSpawnError = (error: NodeJS.ErrnoException): string =>
+        `Failed to spawn ${command} ${args.join(" ")}: ${error.code ?? "error"} ${error.message}`.trim();
+
+      const onSpawnError = (error: NodeJS.ErrnoException): void => {
+        // No process tree exists in this case; nothing to reclaim.
+        rejectSession(failure("spawn", "spawn_enoent", describeSpawnError(error)));
+      };
+
       if (pgid <= 0) {
         // ENOENT-style spawn failure surfaces through 'error'; wait for it so
         // the rejection carries the OS reason rather than a synthetic one.
@@ -381,20 +390,11 @@ export function createStartUpOSDesktopRunner(
             failure("spawn", "spawn_failed", `Process for ${command} never started (pgid unavailable)`),
           );
         });
-        child.once("error", (error: NodeJS.ErrnoException) => {
-          rejectSession(
-            failure("spawn", "spawn_enoent", `Failed to spawn ${command}: ${error.message ?? error.code}`),
-          );
-        });
+        child.once("error", onSpawnError);
         return;
       }
 
-      child.once("error", (error: NodeJS.ErrnoException) => {
-        // No process tree exists in this case; nothing to reclaim.
-        rejectSession(
-          failure("spawn", "spawn_enoent", `Failed to spawn ${command}: ${error.message ?? error.code}`),
-        );
-      });
+      child.once("error", onSpawnError);
 
       resolveSession({
         pgid,
