@@ -41,11 +41,35 @@ export const narrationSourceSchema = z.enum(["narration", "human_supplement", "f
 // Release brief
 // ---------------------------------------------------------------------------
 
-export const releaseFeatureSchema = z.object({
-  id: featureIdSchema,
-  title: z.string().min(1, "feature title must not be empty"),
-  narration: z.string().min(1, "feature narration must not be empty"),
-});
+/**
+ * Feature-level provenance mapping back to one `##` section of the parsed
+ * release document. Either fully present (features derived from a parsed
+ * source) or absent (built-in mock / hand-written briefs) — never partial.
+ */
+export const featureSourceRefSchema = z
+  .object({
+    /** 1-based ordinal of the `##` section within the document. */
+    sectionIndex: z.number().int().min(1, "sectionIndex must be >= 1"),
+    /** Original section heading text, kept human-readable verbatim. */
+    sectionTitle: z.string().min(1, "sectionTitle must not be empty"),
+    /** Inclusive line range of the section in the source document. */
+    startLine: z.number().int().min(1, "startLine must be >= 1"),
+    endLine: z.number().int().min(1, "endLine must be >= 1"),
+  })
+  .strict()
+  .refine((ref) => ref.endLine >= ref.startLine, {
+    message: "endLine must be >= startLine",
+    path: ["endLine"],
+  });
+
+export const releaseFeatureSchema = z
+  .object({
+    id: featureIdSchema,
+    title: z.string().min(1, "feature title must not be empty"),
+    narration: z.string().min(1, "feature narration must not be empty"),
+    sourceRef: featureSourceRefSchema.optional(),
+  })
+  .strict();
 
 export const releaseBriefSchema = z
   .object({
@@ -57,6 +81,7 @@ export const releaseBriefSchema = z
   })
   .strict();
 
+export type FeatureSourceRef = z.infer<typeof featureSourceRefSchema>;
 export type ReleaseFeature = z.infer<typeof releaseFeatureSchema>;
 export type ReleaseBrief = z.infer<typeof releaseBriefSchema>;
 export type RunStatus = z.infer<typeof runStatusSchema>;
@@ -112,6 +137,61 @@ export const entryPointCandidateSchema = z
   .strict();
 
 export type EntryPointCandidate = z.infer<typeof entryPointCandidateSchema>;
+
+// ---------------------------------------------------------------------------
+// Confidence gate (story 2.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the gate classified a feature the way it did. `human_supplement` (the
+ * "needs human input instead" outcome) is produced only by human review edits
+ * in epic 5 — no input channel for it exists yet — but the enum already names
+ * it so downstream consumers do not need to re-version the schema.
+ */
+export const gateReasonSchema = z.enum(["no_evidence", "below_threshold", "eligible"]);
+
+/**
+ * One classification per release feature. `automatable: false` is the explicit
+ * ineligible marker: epic 3's DesktopRunner consumes only decisions with
+ * `automatable: true`, so a gated feature (no evidence / below threshold)
+ * can never be turned into desktop automation.
+ */
+export const gateDecisionSchema = z
+  .object({
+    featureId: featureIdSchema,
+    reason: gateReasonSchema,
+    automatable: z.boolean(),
+    /** Confidence of the best entry-point candidate; absent for no_evidence. */
+    confidence: confidenceSchema.optional(),
+    /** Evidence references of the deciding candidate; empty for no_evidence. */
+    evidenceIds: z.array(z.string().min(1)),
+  })
+  .strict()
+  .refine((decision) => (decision.reason === "eligible") === decision.automatable, {
+    message: "automatable must be true exactly when reason is eligible",
+    path: ["automatable"],
+  })
+  .refine((decision) => (decision.reason === "no_evidence") === (decision.evidenceIds.length === 0), {
+    message: "no_evidence decisions must carry no evidence references; all others must cite evidence",
+    path: ["evidenceIds"],
+  })
+  .refine((decision) => (decision.reason === "no_evidence") === (decision.confidence === undefined), {
+    message: "confidence is required unless the decision is no_evidence",
+    path: ["confidence"],
+  });
+
+export const gateResultSchema = z
+  .object({
+    releaseVersion: z.string().min(1, "gate release version must not be empty"),
+    /** The threshold this run actually classified against, for auditability. */
+    threshold: confidenceSchema,
+    decisions: z.array(gateDecisionSchema),
+  })
+  .strict();
+
+export type GateReason = z.infer<typeof gateReasonSchema>;
+export type GateDecision = z.infer<typeof gateDecisionSchema>;
+export type GateResult = z.infer<typeof gateResultSchema>;
 
 // ---------------------------------------------------------------------------
 // Scene plan
@@ -199,6 +279,7 @@ export const releasePackageSchema = z
     release: releaseBriefSchema,
     evidence: evidencePackSchema.optional(),
     entryPoints: z.array(entryPointCandidateSchema).optional(),
+    gate: gateResultSchema.optional(),
     scenePlan: scenePlanSchema.optional(),
     manifest: renderManifestSchema.optional(),
     run: runRecordSchema.optional(),
@@ -275,6 +356,9 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
   for (const candidate of packageValue.entryPoints ?? []) {
     assertReferences(release, candidate.featureId, `entryPoints[id=${candidate.id}].featureId`);
   }
+  for (const decision of packageValue.gate?.decisions ?? []) {
+    assertReferences(release, decision.featureId, `gate.decisions[featureId=${decision.featureId}]`);
+  }
   for (const scene of packageValue.scenePlan?.scenes ?? []) {
     assertReferences(release, scene.featureId, `scenePlan.scenes[id=${scene.id}].featureId`);
   }
@@ -287,6 +371,14 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
     throw new DomainValidationError([
       {
         path: "evidence.releaseVersion",
+        message: `does not match release version "${version}"`,
+      },
+    ]);
+  }
+  if (packageValue.gate && packageValue.gate.releaseVersion !== version) {
+    throw new DomainValidationError([
+      {
+        path: "gate.releaseVersion",
         message: `does not match release version "${version}"`,
       },
     ]);
@@ -306,5 +398,33 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
         message: `does not match release version "${version}"`,
       },
     ]);
+  }
+
+  // Gate ↔ scenePlan consistency: the gate result is the authority on which
+  // features are downgraded, and the scene plan must narrate accordingly
+  // (gated → fallback, eligible → narration). Checked per feature the gate
+  // decided on; features absent from the gate are unconstrained here.
+  if (packageValue.gate && packageValue.scenePlan) {
+    const sceneByFeatureId = new Map(packageValue.scenePlan.scenes.map((s) => [s.featureId, s]));
+    for (const decision of packageValue.gate.decisions) {
+      const scene = sceneByFeatureId.get(decision.featureId);
+      if (!scene) {
+        throw new DomainValidationError([
+          {
+            path: `gate.decisions[featureId=${decision.featureId}]`,
+            message: "gate decided on a feature that has no scene in the scene plan",
+          },
+        ]);
+      }
+      const expected = decision.automatable ? "narration" : "fallback";
+      if (scene.narrationSource !== expected) {
+        throw new DomainValidationError([
+          {
+            path: `scenePlan.scenes[id=${scene.id}].narrationSource`,
+            message: `feature "${decision.featureId}" is ${decision.automatable ? "eligible" : `gated (${decision.reason})`} so narrationSource must be "${expected}", got "${scene.narrationSource}"`,
+          },
+        ]);
+      }
+    }
   }
 }
