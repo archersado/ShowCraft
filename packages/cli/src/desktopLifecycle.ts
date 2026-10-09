@@ -414,7 +414,7 @@ export function createStartUpOSDesktopRunner(
       throw failure("readiness", "no_session", "Readiness wait started without a session");
     }
     let httpOk = false;
-    let electronSeen = false;
+    let electronLastSeen: ElectronProcess | null = null;
     while (Date.now() < deadline) {
       const exit = await Promise.race([
         aliveSession.exited.then((result) => ({ exited: true as const, result })),
@@ -437,17 +437,20 @@ export function createStartUpOSDesktopRunner(
       if (!httpOk) {
         httpOk = await pollHttpOnce(rendererUrl);
       }
-      if (!electronSeen) {
-        electronSeen = findElectronMain(aliveSession.pgid, psCommand) !== null;
-      }
-      if (httpOk && electronSeen) {
+      // The Electron-main gate is evaluated FRESH every round — never latched.
+      // A main process that appears for one poll and exits (single-instance
+      // lock pseudo-ready path) must not leave a stale "seen" behind: readiness
+      // requires the main process to be alive in the group at the decision
+      // moment, not merely to have been spotted once.
+      electronLastSeen = findElectronMain(aliveSession.pgid, psCommand);
+      if (httpOk && electronLastSeen) {
         return { rendererUrl };
       }
     }
     throw failure("readiness", "readiness_timeout", `Desktop app not ready within ${readinessTimeoutMs}ms`, {
       readiness_timeout_ms: String(readinessTimeoutMs),
       http_reached_2xx: String(httpOk),
-      electron_main_seen: String(electronSeen),
+      electron_main_seen: String(electronLastSeen !== null),
     });
   }
 
