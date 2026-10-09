@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import {
+  applyConfidenceGate,
   createMockReleaseSource,
   createMockRenderer,
   createMockScenePlanner,
+  gateThreshold,
+  matchCommitsToFeatures,
+  normalizeSectionsToFeatures,
   parseReleaseDocument,
   parseReleaseSourceRef,
   releaseBriefSchema,
@@ -16,10 +20,14 @@ import {
   runPipeline,
   validateLocalSource,
   isSecretPath,
+  type CodeEvidencePort,
+  type ConfidenceGatePort,
+  type EvidenceResult,
   type ReleaseBrief,
 } from "@showcraft/core";
 
 import { createRunDirectory, persistRunEvents } from "./runStore.js";
+import { collectCommits, collectDiffSample, discoverGitRepo, resolveTagRange } from "./gitEvidence.js";
 
 export type DemoOptions = {
   outputRoot?: string;
@@ -42,6 +50,18 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     ? await createFileReleaseSource(options.source, { cwd: options.cwd })
     : createMockReleaseSource();
 
+  // Evidence is enrichment over a --source release only: the mock demo keeps
+  // its exact Story 1.6 artifact set (no evidence.json, byte-identical).
+  const codeEvidence = options.source
+    ? await createGitEvidencePort(options.source, { cwd: options.cwd })
+    : undefined;
+
+  // The gate consumes evidence outcomes, so it is injected exactly when the
+  // evidence port is; the mock pipeline keeps producing its 4-file artifact set.
+  const confidenceGate: ConfidenceGatePort | undefined = codeEvidence
+    ? (release, evidence) => applyConfidenceGate(release, evidence.pack, evidence.entryPoints, gateThreshold)
+    : undefined;
+
   const store = new RunStoreCore(runId);
   // CLI assembles the adapters; core only sees the ports.
   await runPipeline(
@@ -49,6 +69,8 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       releaseSource,
       scenePlanner: createMockScenePlanner(),
       renderer: createMockRenderer(),
+      ...(codeEvidence ? { codeEvidence } : {}),
+      ...(confidenceGate ? { confidenceGate } : {}),
     },
     store,
   );
@@ -68,9 +90,9 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
 
 /**
  * Build a release source port from a local Markdown file. The path is
- * validated by the core security rules before its content is read; parsing
- * sections into features is story 2.2 — here every section becomes one
- * placeholder feature so the existing pipeline still runs end to end.
+ * validated by the core security rules before its content is read; sections
+ * are normalized into features (with sourceRef provenance) by the core
+ * mapping shared with the rest of the pipeline.
  */
 async function createFileReleaseSource(
   rawSource: string,
@@ -105,11 +127,7 @@ async function createFileReleaseSource(
       version,
       source: absolutePath,
       sourceDigest,
-      features: document.sections.map((section, index) => ({
-        id: `section-${index + 1}-${slugify(section.title)}`,
-        title: section.title,
-        narration: section.bullets.join("；") || section.title,
-      })),
+      features: normalizeSectionsToFeatures(document.sections),
     };
     return releaseBriefSchema.parse(brief);
   };
@@ -124,13 +142,78 @@ async function statSource(path: string): Promise<{ exists: boolean; isDirectory:
   }
 }
 
-function slugify(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "section";
+/**
+ * Build the read-only git evidence port for a `--source` release. The
+ * repository is discovered from the changelog location (walking up to the
+ * nearest `.git`); the commit range comes from the release version's
+ * `desktop-…` tags. Repository absence, missing tags and empty ranges all
+ * degrade to explicit empty evidence — evidence retrieval is best-effort
+ * enrichment, not a correctness precondition.
+ */
+async function createGitEvidencePort(
+  rawSource: string,
+  options: { cwd?: string },
+): Promise<CodeEvidencePort> {
+  const ref = parseReleaseSourceRef(rawSource);
+  if (ref.kind === "github") {
+    // Same placeholder boundary as the release source: no network access.
+    return (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+  }
+  const changelogPath = resolve(options.cwd ?? process.cwd(), ref.path);
+  const repoRoot = await discoverGitRepo(changelogPath);
+  if (!repoRoot) {
+    return emptyEvidencePort;
+  }
+
+  return async (release: ReleaseBrief): Promise<EvidenceResult> => {
+    const range = await resolveTagRange(release.version, repoRoot);
+    if (!range) {
+      return emptyEvidence(release);
+    }
+    let commits;
+    try {
+      commits = await collectCommits(range, repoRoot);
+    } catch {
+      // Missing tags / empty ranges / unknown refs degrade to empty evidence.
+      return emptyEvidence(release);
+    }
+    const matched = matchCommitsToFeatures(release, commits);
+    // Enrich the highest-confidence commit evidence per feature with a diff
+    // sample (first hunk only — never a full file expansion).
+    const pack = { ...matched.pack };
+    const diffSamples = new Map<string, string>();
+    for (const entry of pack.entries) {
+      if (entry.kind === "commit" && !diffSamples.has(entry.reference.location)) {
+        const sample = await collectDiffSample(entry.reference.location, repoRoot).catch(
+          () => undefined,
+        );
+        if (sample) {
+          diffSamples.set(entry.reference.location, sample);
+        }
+      }
+    }
+    return {
+      pack: {
+        ...pack,
+        entries: pack.entries.map((entry) => {
+          const excerpt = diffSamples.get(entry.reference.location);
+          return excerpt ? { ...entry, reference: { ...entry.reference, excerpt } } : entry;
+        }),
+      },
+      entryPoints: matched.entryPoints,
+    };
+  };
 }
+
+const emptyEvidence = (release: ReleaseBrief): EvidenceResult => ({
+  pack: { releaseVersion: release.version, entries: [] },
+  entryPoints: [],
+});
+
+const emptyEvidencePort: CodeEvidencePort = (release) => emptyEvidence(release);
 
 export function parseDemoArgs(
   args: readonly string[],
