@@ -3,7 +3,7 @@ title: 'StartUpOS Desktop 生命周期 adapter'
 type: 'feature'
 ticket: '5'
 created: '2026-10-09'
-status: draft
+status: ready-for-dev
 route: 'full'
 route_source: 'auto'
 review: ''
