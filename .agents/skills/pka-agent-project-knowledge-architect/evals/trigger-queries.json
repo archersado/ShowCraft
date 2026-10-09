@@ -1,0 +1,16 @@
+[
+  {"query": "给新项目搭一个业务、产品、技术三层，并按结构、运行、机制组织的项目知识骨架。", "should_trigger": true},
+  {"query": "这个旧项目仍用 space、time、logic 文档，帮我继续维护项目知识。", "should_trigger": true},
+  {"query": "把这个老项目的需求文档、代码和交付物只读归档成可追溯的项目认知。", "should_trigger": true},
+  {"query": "新需求进来了，刷新项目知识模型并标出和旧方案的冲突。", "should_trigger": true},
+  {"query": "我有个问题：订单取消为什么需要人工审核？跟我讨论清楚后更新对应的业务、产品和技术架构。", "should_trigger": true},
+  {"query": "检查这套项目模型里静态模块是否真的支撑了动态运行行为。", "should_trigger": true},
+  {"query": "基于项目知识和交付证据做一次复盘，留下可验证的模式候选。", "should_trigger": true},
+  {"query": "扫描 projects 下各项目的标准化知识，提炼一个独立的跨项目主题。", "should_trigger": true},
+  {"query": "帮我为订单服务写一份技术架构方案，重点是容灾和部署拓扑。", "should_trigger": false},
+  {"query": "整理一下本地项目目录，把需求、代码和交付物移动到统一文件夹。", "should_trigger": false},
+  {"query": "把这篇文章总结成一页个人知识卡片。", "should_trigger": false},
+  {"query": "review 这个 PR，看看代码的架构分层有没有问题。", "should_trigger": false},
+  {"query": "给新产品写 PRD，分成业务需求、产品功能和技术约束。", "should_trigger": false},
+  {"query": "比较三个仓库的依赖版本，列出需要统一升级的包。", "should_trigger": false}
+]
