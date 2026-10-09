@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import {
+  applyConfidenceGate,
   createMockReleaseSource,
   createMockRenderer,
   createMockScenePlanner,
+  gateThreshold,
   matchCommitsToFeatures,
   normalizeSectionsToFeatures,
   parseReleaseDocument,
@@ -19,6 +21,7 @@ import {
   validateLocalSource,
   isSecretPath,
   type CodeEvidencePort,
+  type ConfidenceGatePort,
   type EvidenceResult,
   type ReleaseBrief,
 } from "@showcraft/core";
@@ -53,6 +56,12 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     ? await createGitEvidencePort(options.source, { cwd: options.cwd })
     : undefined;
 
+  // The gate consumes evidence outcomes, so it is injected exactly when the
+  // evidence port is; the mock pipeline keeps producing its 4-file artifact set.
+  const confidenceGate: ConfidenceGatePort | undefined = codeEvidence
+    ? (release, evidence) => applyConfidenceGate(release, evidence.pack, evidence.entryPoints, gateThreshold)
+    : undefined;
+
   const store = new RunStoreCore(runId);
   // CLI assembles the adapters; core only sees the ports.
   await runPipeline(
@@ -61,6 +70,7 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       scenePlanner: createMockScenePlanner(),
       renderer: createMockRenderer(),
       ...(codeEvidence ? { codeEvidence } : {}),
+      ...(confidenceGate ? { confidenceGate } : {}),
     },
     store,
   );

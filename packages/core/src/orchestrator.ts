@@ -1,7 +1,13 @@
 import type { ReleaseBrief, RenderManifest } from "./domain.js";
 import type { RunStage } from "./runStore.js";
 import { RunStoreCore } from "./runStore.js";
-import type { CodeEvidencePort, RendererPort, ReleaseSourcePort, ScenePlannerPort } from "./ports.js";
+import type {
+  CodeEvidencePort,
+  ConfidenceGatePort,
+  RendererPort,
+  ReleaseSourcePort,
+  ScenePlannerPort,
+} from "./ports.js";
 
 /**
  * Stage-driven orchestration over provider ports. Each stage's artifact goes
@@ -17,10 +23,13 @@ export type PipelinePorts = {
   /** Optional: when absent the evidence stage is skipped entirely (mock runs
    * keep their exact Story 1.6 artifact set). */
   codeEvidence?: CodeEvidencePort;
+  /** Optional: when absent the gate stage is skipped entirely. Only meaningful
+   * together with `codeEvidence` — the gate classifies evidence outcomes. */
+  confidenceGate?: ConfidenceGatePort;
 };
 
 /** Tracks how far the pipeline progressed for accurate failure attribution. */
-type StageProgress = "release" | "evidence" | "scenePlan" | "manifest" | "completed";
+type StageProgress = "release" | "evidence" | "gate" | "scenePlan" | "manifest" | "completed";
 
 export class StageFailure extends Error {
   constructor(
@@ -41,14 +50,24 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
     release = await ports.releaseSource();
     store.recordArtifact({ stage: "release", value: release });
 
+    let gatedFeatureIds: ReadonlySet<string> | undefined;
     if (ports.codeEvidence) {
       progress = "evidence";
       const evidence = await ports.codeEvidence(release);
       store.recordArtifact({ stage: "evidence", value: evidence });
+
+      if (ports.confidenceGate) {
+        progress = "gate";
+        const gate = await ports.confidenceGate(release, evidence);
+        store.recordArtifact({ stage: "gate", value: gate });
+        gatedFeatureIds = new Set(
+          gate.decisions.filter((decision) => !decision.automatable).map((d) => d.featureId),
+        );
+      }
     }
 
     progress = "scenePlan";
-    const scenePlan = await ports.scenePlanner(release);
+    const scenePlan = await ports.scenePlanner(release, { gatedFeatureIds });
     store.recordArtifact({ stage: "scenePlan", value: scenePlan });
 
     progress = "manifest";

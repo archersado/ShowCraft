@@ -22,15 +22,27 @@ const evidencePack: EvidencePack = { releaseVersion: release.version, entries: [
 describe("RunStoreCore", () => {
   it("stages schema-validated artifacts and completes a run", () => {
     const store = new RunStoreCore("run-ok");
-    for (const stage of ["release", "evidence", "scenePlan", "manifest"] as const) {
+    const gateResult = {
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "no_evidence" as const,
+        automatable: false,
+        evidenceIds: [],
+      })),
+    };
+    for (const stage of ["release", "evidence", "gate", "scenePlan", "manifest"] as const) {
       const artifact =
         stage === "release"
           ? release
           : stage === "evidence"
             ? { pack: evidencePack, entryPoints: [] }
-            : stage === "scenePlan"
-              ? scenePlan
-              : manifest;
+            : stage === "gate"
+              ? gateResult
+              : stage === "scenePlan"
+                ? scenePlan
+                : manifest;
       store.recordArtifact({ stage, value: artifact });
     }
     store.complete();
@@ -40,15 +52,17 @@ describe("RunStoreCore", () => {
     expect(files.map((file) => file.fileName)).toEqual([
       "release.json",
       "evidence.json",
+      "gate.json",
       "scene.json",
       "manifest.json",
       "run.json",
     ]);
-    const record = JSON.parse(new TextDecoder().decode(files[4]?.bytes));
+    const record = JSON.parse(new TextDecoder().decode(files[5]?.bytes));
     expect(record).toMatchObject({ runId: "run-ok", status: "completed" });
     expect(record.artifacts).toEqual([
       "release.json",
       "evidence.json",
+      "gate.json",
       "scene.json",
       "manifest.json",
     ]);
@@ -102,6 +116,42 @@ describe("RunStoreCore", () => {
       }),
     ).toThrow(DomainValidationError);
     expect(store.collectFiles().some((file) => file.fileName === "evidence.json")).toBe(false);
+  });
+
+  it("rejects gate artifacts that fail their schema without staging anything", () => {
+    const store = new RunStoreCore("run-bad-gate");
+    expect(() =>
+      store.recordArtifact({
+        stage: "gate",
+        value: {
+          releaseVersion: "",
+          threshold: 0.8,
+          decisions: [],
+        },
+      }),
+    ).toThrow(DomainValidationError);
+    expect(store.collectFiles().some((file) => file.fileName === "gate.json")).toBe(false);
+  });
+
+  it("rejects gate decisions whose automatable flag contradicts their reason", () => {
+    const store = new RunStoreCore("run-gate-contradiction");
+    expect(() =>
+      store.recordArtifact({
+        stage: "gate",
+        value: {
+          releaseVersion: release.version,
+          threshold: 0.8,
+          decisions: [
+            {
+              featureId: release.features[0]!.id,
+              reason: "no_evidence",
+              automatable: true,
+              evidenceIds: [],
+            },
+          ],
+        },
+      }),
+    ).toThrow(DomainValidationError);
   });
 
   it("rejects artifacts that fail their schema without staging anything", () => {
@@ -160,8 +210,9 @@ describe("RunStoreCore", () => {
   });
 
   it("exposes stable stage ordering and file names", () => {
-    expect(runStageOrder).toEqual(["release", "evidence", "scenePlan", "manifest"]);
+    expect(runStageOrder).toEqual(["release", "evidence", "gate", "scenePlan", "manifest"]);
     expect(stageFileNames.release).toBe("release.json");
     expect(stageFileNames.evidence).toBe("evidence.json");
+    expect(stageFileNames.gate).toBe("gate.json");
   });
 });

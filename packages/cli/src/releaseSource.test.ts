@@ -10,6 +10,7 @@ import {
   entryPointCandidateSchema,
   evidenceEntrySchema,
   evidencePackSchema,
+  gateResultSchema,
   releasePackageSchema,
   safeParseReleasePackage,
 } from "@showcraft/core";
@@ -161,6 +162,102 @@ describe("runDemo with --source", () => {
     const a = await readFile(join(first.runDirectory, "evidence.json"));
     const b = await readFile(join(second.runDirectory, "evidence.json"));
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
+  });
+
+  it(startuposAvailable ? "gates the v0.3.3 features: no_evidence downgraded, evidence-backed eligible" : "skips gate assertions outside CI fixture", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-gate-"));
+    temporaryPaths.push(root);
+    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
+    if (!sourcePath) return;
+
+    const result = await runDemo({ outputRoot: root, runId: "v033-gate", source: sourcePath });
+
+    expect(result.status).toBe("completed");
+    const runDirectory = result.runDirectory;
+
+    // --source runs now produce the 5-artifact set with gate.json between
+    // evidence.json and scene.json.
+    const record = JSON.parse(await readFile(join(runDirectory, "run.json"), "utf8"));
+    expect(record.artifacts).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "scene.json",
+      "manifest.json",
+    ]);
+
+    const gate = JSON.parse(await readFile(join(runDirectory, "gate.json"), "utf8"));
+    expect(gateResultSchema.safeParse(gate).success).toBe(true);
+    expect(gate.threshold).toBe(0.8);
+    expect(gate.releaseVersion).toBe("v0.3.3");
+
+    const byFeature = new Map(
+      gate.decisions.map((decision: { featureId: string }) => [decision.featureId, decision]),
+    );
+    // No-evidence feature: exactly one explicit ineligible decision.
+    const noEvidence = byFeature.get("section-2-section");
+    expect(noEvidence).toEqual({
+      featureId: "section-2-section",
+      reason: "no_evidence",
+      automatable: false,
+      evidenceIds: [],
+    });
+    // Evidence-backed features above the threshold stay automatable
+    // (epic 3 DesktopRunner input = gate.json automatable:true decisions).
+    for (const featureId of ["section-1-im", "section-3-agent", "section-4-section"]) {
+      const decision = byFeature.get(featureId);
+      expect(decision, featureId).toMatchObject({ reason: "eligible", automatable: true });
+      expect(decision.confidence).toBeGreaterThanOrEqual(gate.threshold);
+    }
+    expect(byFeature.get("section-1-im")?.confidence).toBeCloseTo(0.85, 12);
+
+    // Evidence references resolve into evidence.json entries (empty for no_evidence).
+    const evidenceFile = JSON.parse(await readFile(join(runDirectory, "evidence.json"), "utf8"));
+    const entryIds = new Set(evidenceFile.entries.map((entry: { id: string }) => entry.id));
+    for (const decision of gate.decisions) {
+      for (const evidenceId of decision.evidenceIds) {
+        expect(entryIds.has(evidenceId), evidenceId).toBe(true);
+      }
+    }
+
+    // Scenes narrate the gate outcome: gated → fallback, eligible → narration.
+    const scenePlan = JSON.parse(await readFile(join(runDirectory, "scene.json"), "utf8"));
+    const sceneByFeature = new Map(
+      scenePlan.scenes.map((scene: { featureId: string }) => [scene.featureId, scene]),
+    );
+    expect(sceneByFeature.get("section-2-section")?.narrationSource).toBe("fallback");
+    for (const featureId of ["section-1-im", "section-3-agent", "section-4-section"]) {
+      expect(sceneByFeature.get(featureId)?.narrationSource).toBe("narration");
+    }
+
+    // The full package passes the cross-artifact relation checks, including
+    // the new gate ↔ scenePlan consistency.
+    const release = JSON.parse(await readFile(join(runDirectory, "release.json"), "utf8"));
+    const { entryPoints } = evidenceFile;
+    const parsedPackage = safeParseReleasePackage(releasePackageSchema, {
+      release,
+      evidence: { releaseVersion: evidenceFile.releaseVersion, entries: evidenceFile.entries },
+      entryPoints,
+      gate,
+      scenePlan,
+    });
+    expect(parsedPackage.success).toBe(true);
+  });
+
+  it(startuposAvailable ? "is byte-stable for repeated v0.3.3 gate runs" : "skips gate byte-stability outside CI fixture", async () => {
+    const firstRoot = await mkdtemp(join(tmpdir(), "showcraft-gate-bytes-a-"));
+    const secondRoot = await mkdtemp(join(tmpdir(), "showcraft-gate-bytes-b-"));
+    temporaryPaths.push(firstRoot, secondRoot);
+    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
+    if (!sourcePath) return;
+
+    const first = await runDemo({ outputRoot: firstRoot, runId: "gate-bytes", source: sourcePath });
+    const second = await runDemo({ outputRoot: secondRoot, runId: "gate-bytes", source: sourcePath });
+    for (const fileName of ["gate.json", "scene.json"]) {
+      const a = await readFile(join(first.runDirectory, fileName));
+      const b = await readFile(join(second.runDirectory, fileName));
+      expect(Buffer.from(a).equals(Buffer.from(b)), fileName).toBe(true);
+    }
   });
 
   it(startuposAvailable ? "keeps evidence.json absent for mock runs" : "keeps evidence.json absent", async () => {

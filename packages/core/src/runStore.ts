@@ -2,12 +2,14 @@ import {
   DomainValidationError,
   entryPointCandidateSchema,
   evidencePackSchema,
+  gateResultSchema,
   releaseBriefSchema,
   renderManifestSchema,
   runRecordSchema,
   scenePlanSchema,
   type EntryPointCandidate,
   type EvidencePack,
+  type GateResult,
   type ReleaseBrief,
   type RenderManifest,
   type RunRecord,
@@ -23,15 +25,22 @@ import { parseWithSchema, stableJsonBytes } from "./serialization.js";
  * the CLI adapter (packages/cli/src/runStore.ts).
  */
 
-/** Stages whose artifacts the release pipeline persists. Evidence runs only
- * when a CodeEvidencePort is provided; the mock pipeline skips it. */
-export type RunStage = "release" | "evidence" | "scenePlan" | "manifest";
+/** Stages whose artifacts the release pipeline persists. Evidence and gate run
+ * only when the corresponding ports are provided; the mock pipeline skips both. */
+export type RunStage = "release" | "evidence" | "gate" | "scenePlan" | "manifest";
 
-export const runStageOrder: readonly RunStage[] = ["release", "evidence", "scenePlan", "manifest"];
+export const runStageOrder: readonly RunStage[] = [
+  "release",
+  "evidence",
+  "gate",
+  "scenePlan",
+  "manifest",
+];
 
 export const stageFileNames: Record<RunStage, string> = {
   release: "release.json",
   evidence: "evidence.json",
+  gate: "gate.json",
   scenePlan: "scene.json",
   manifest: "manifest.json",
 };
@@ -75,6 +84,7 @@ const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
 export type StageArtifact =
   | { stage: "release"; value: ReleaseBrief }
   | { stage: "evidence"; value: { pack: EvidencePack; entryPoints: EntryPointCandidate[] } }
+  | { stage: "gate"; value: GateResult }
   | { stage: "scenePlan"; value: ScenePlan }
   | { stage: "manifest"; value: RenderManifest };
 
@@ -141,6 +151,11 @@ export class RunStoreCore {
           throw new DomainValidationError(candidateResult.issues);
         }
       }
+    } else if (artifact.stage === "gate") {
+      const result = parseWithSchema(gateChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
     } else if (artifact.stage === "scenePlan") {
       const result = parseWithSchema(scenePlanChecker, artifact.value);
       if (!result.success) {
@@ -201,5 +216,6 @@ export class RunStoreCore {
 const releaseBriefChecker = releaseBriefSchema;
 const evidencePackChecker = evidencePackSchema;
 const entryPointChecker = entryPointCandidateSchema;
+const gateChecker = gateResultSchema;
 const scenePlanChecker = scenePlanSchema;
 const manifestChecker = renderManifestSchema;

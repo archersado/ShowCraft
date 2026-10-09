@@ -7,6 +7,9 @@ export {
   evidenceReferenceSchema,
   featureIdSchema,
   featureSourceRefSchema,
+  gateDecisionSchema,
+  gateReasonSchema,
+  gateResultSchema,
   narrationSourceSchema,
   releaseFeatureSchema,
   releaseBriefSchema,
@@ -32,6 +35,9 @@ export type {
   EvidencePack,
   EvidenceReference,
   FeatureSourceRef,
+  GateDecision,
+  GateReason,
+  GateResult,
   ReleaseBrief,
   ReleaseFeature,
   ReleasePackage,
@@ -72,14 +78,18 @@ export {
 
 export type {
   CodeEvidencePort,
+  ConfidenceGatePort,
   EvidenceResult,
   ReleaseSourcePort,
   RendererPort,
+  ScenePlanningContext,
   ScenePlannerPort,
 } from "./ports.js";
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
+
+export { applyConfidenceGate, gateThreshold } from "./confidenceGate.js";
 
 export {
   collectTokens,
