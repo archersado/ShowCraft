@@ -11,7 +11,8 @@
     "typecheck": "pnpm --recursive run typecheck",
     "lint": "eslint .",
     "test": "vitest run",
-    "demo": "node --import tsx packages/cli/src/main.ts"
+    "demo": "node --import tsx packages/cli/src/main.ts",
+    "desktop:lifecycle": "node --import tsx packages/cli/src/desktopLifecycleCli.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
