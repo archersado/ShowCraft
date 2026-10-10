@@ -1,0 +1,20 @@
+code: pka
+name: "项目知识架构"
+description: "以业务、产品、技术三维架构和结构、运行、机制三视图，通过项目证据与问题生命周期持续沉淀可复用知识。"
+module_version: 1.2.0
+default_selected: false
+module_greeting: >
+  项目知识架构模块已完成注册。你可以新建或归档项目知识架构、用问题生命周期驱动架构演化、刷新和检查模型、执行项目复盘、审计证据，或从多个项目聚合主题认知。
+
+knowledge_hub_root:
+  prompt: "跨项目知识统一目录放在哪里？暂不使用跨项目聚合时可留空。"
+  default: ""
+  user_setting: true
+  example: "/Users/you/knowledge-hub"
+
+agents:
+  - code: project-knowledge-architect
+    name: ""
+    title: "项目知识架构师"
+    icon: "🧭"
+    description: "把新建或存量项目建模为可由问题生命周期驱动演化、可复盘、可跨项目聚合的知识资产。"
