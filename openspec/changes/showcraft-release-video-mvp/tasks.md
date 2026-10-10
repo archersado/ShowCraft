@@ -16,7 +16,7 @@
 
 ## 3. StartUpOS Desktop 演示与录屏
 
-- [ ] 3.1 建立 StartUpOS Desktop 生命周期 adapter、就绪探测和可诊断的停止逻辑，并验证启动失败不会遗留进程
+- [x] 3.1 建立 StartUpOS Desktop 生命周期 adapter、就绪探测和可诊断的停止逻辑，并验证启动失败不会遗留进程
 - [ ] 3.2 实现感知与 IM 路由的首个证据驱动演示路径，并验证动作记录同时引用 changelog 与 commit/code 证据
 - [ ] 3.3 接入本地录屏并将媒体引用写入 run，验证元素定位或录制失败时不产生伪成功视频
 - [ ] 3.4 为桌面路径加入可重复测试的 mock/fixture 边界，并验证无需真实凭据的回归测试通过
