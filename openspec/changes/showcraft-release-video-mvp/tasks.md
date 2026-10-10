@@ -10,13 +10,13 @@
 ## 2. 发布来源与代码证据
 
 - [x] 2.1 实现 CLI `--source`、本地 Markdown/GitHub URL 校验与 StartUpOS release 路径解析，并验证 v0.3.3 changelog 可解析、秘密/目录来源被拒绝
-- [ ] 2.2 实现 Changelog section 到 feature 的归一化与来源映射，并验证每个 v0.3.3 feature 可回链原始段落
-- [ ] 2.3 实现只读 Git 提交/diff/符号证据检索和置信度输出，并验证感知与 IM 路由得到可追溯入口候选
-- [ ] 2.4 实现低置信度门禁与人工补充输出，并验证无证据 feature 不会产生桌面自动化动作
+- [x] 2.2 实现 Changelog section 到 feature 的归一化与来源映射，并验证每个 v0.3.3 feature 可回链原始段落
+- [x] 2.3 实现只读 Git 提交/diff/符号证据检索和置信度输出，并验证感知与 IM 路由得到可追溯入口候选
+- [x] 2.4 实现低置信度门禁与人工补充输出，并验证无证据 feature 不会产生桌面自动化动作
 
 ## 3. StartUpOS Desktop 演示与录屏
 
-- [ ] 3.1 建立 StartUpOS Desktop 生命周期 adapter、就绪探测和可诊断的停止逻辑，并验证启动失败不会遗留进程
+- [x] 3.1 建立 StartUpOS Desktop 生命周期 adapter、就绪探测和可诊断的停止逻辑，并验证启动失败不会遗留进程
 - [ ] 3.2 实现感知与 IM 路由的首个证据驱动演示路径，并验证动作记录同时引用 changelog 与 commit/code 证据
 - [ ] 3.3 接入本地录屏并将媒体引用写入 run，验证元素定位或录制失败时不产生伪成功视频
 - [ ] 3.4 为桌面路径加入可重复测试的 mock/fixture 边界，并验证无需真实凭据的回归测试通过
