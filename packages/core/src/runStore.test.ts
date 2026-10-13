@@ -32,7 +32,7 @@ describe("RunStoreCore", () => {
         evidenceIds: [],
       })),
     };
-    for (const stage of ["release", "evidence", "gate", "scenePlan", "manifest"] as const) {
+    for (const stage of ["release", "evidence", "gate", "desktop", "scenePlan", "manifest"] as const) {
       const artifact =
         stage === "release"
           ? release
@@ -40,6 +40,8 @@ describe("RunStoreCore", () => {
             ? { pack: evidencePack, entryPoints: [] }
             : stage === "gate"
               ? gateResult
+              : stage === "desktop"
+                ? { releaseVersion: release.version, threshold: 0.8, actions: [] }
               : stage === "scenePlan"
                 ? scenePlan
                 : manifest;
@@ -53,16 +55,20 @@ describe("RunStoreCore", () => {
       "release.json",
       "evidence.json",
       "gate.json",
+      "actions.json",
       "scene.json",
       "manifest.json",
       "run.json",
     ]);
-    const record = JSON.parse(new TextDecoder().decode(files[5]?.bytes));
+    const record = JSON.parse(
+      new TextDecoder().decode(files.find((file) => file.fileName === "run.json")?.bytes),
+    );
     expect(record).toMatchObject({ runId: "run-ok", status: "completed" });
     expect(record.artifacts).toEqual([
       "release.json",
       "evidence.json",
       "gate.json",
+      "actions.json",
       "scene.json",
       "manifest.json",
     ]);
@@ -210,9 +216,10 @@ describe("RunStoreCore", () => {
   });
 
   it("exposes stable stage ordering and file names", () => {
-    expect(runStageOrder).toEqual(["release", "evidence", "gate", "scenePlan", "manifest"]);
+    expect(runStageOrder).toEqual(["release", "evidence", "gate", "desktop", "scenePlan", "manifest"]);
     expect(stageFileNames.release).toBe("release.json");
     expect(stageFileNames.evidence).toBe("evidence.json");
     expect(stageFileNames.gate).toBe("gate.json");
+    expect(stageFileNames.desktop).toBe("actions.json");
   });
 });

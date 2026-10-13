@@ -1,9 +1,16 @@
-import type { ReleaseBrief, RenderManifest } from "./domain.js";
+import {
+  validateReleasePackageRelations,
+  type EvidencePack,
+  type GateResult,
+  type ReleaseBrief,
+  type RenderManifest,
+} from "./domain.js";
 import type { RunStage } from "./runStore.js";
 import { RunStoreCore } from "./runStore.js";
 import type {
   CodeEvidencePort,
   ConfidenceGatePort,
+  DesktopDemoPort,
   RendererPort,
   ReleaseSourcePort,
   ScenePlannerPort,
@@ -26,10 +33,12 @@ export type PipelinePorts = {
   /** Optional: when absent the gate stage is skipped entirely. Only meaningful
    * together with `codeEvidence` — the gate classifies evidence outcomes. */
   confidenceGate?: ConfidenceGatePort;
+  /** Optional: when absent the desktop stage is skipped entirely. */
+  desktopDemo?: DesktopDemoPort;
 };
 
 /** Tracks how far the pipeline progressed for accurate failure attribution. */
-type StageProgress = "release" | "evidence" | "gate" | "scenePlan" | "manifest" | "completed";
+type StageProgress = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "manifest" | "completed";
 
 export class StageFailure extends Error {
   constructor(
@@ -51,18 +60,46 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
     store.recordArtifact({ stage: "release", value: release });
 
     let gatedFeatureIds: ReadonlySet<string> | undefined;
+    let evidencePack: EvidencePack | undefined;
+    let gateResult: GateResult | undefined;
     if (ports.codeEvidence) {
       progress = "evidence";
       const evidence = await ports.codeEvidence(release);
       store.recordArtifact({ stage: "evidence", value: evidence });
+      evidencePack = evidence.pack;
 
       if (ports.confidenceGate) {
         progress = "gate";
         const gate = await ports.confidenceGate(release, evidence);
         store.recordArtifact({ stage: "gate", value: gate });
+        gateResult = gate;
         gatedFeatureIds = new Set(
           gate.decisions.filter((decision) => !decision.automatable).map((d) => d.featureId),
         );
+      }
+    }
+
+    if (ports.desktopDemo && gateResult) {
+      progress = "desktop";
+      const actions = await ports.desktopDemo(release, gateResult);
+      const desktopArtifact = {
+        releaseVersion: release.version,
+        threshold: gateResult.threshold,
+        actions,
+      };
+      validateReleasePackageRelations({
+        release,
+        ...(evidencePack ? { evidence: evidencePack } : {}),
+        gate: gateResult,
+        actions: desktopArtifact,
+      });
+      store.recordArtifact({
+        stage: "desktop",
+        value: desktopArtifact,
+      });
+      const failed = actions.find((action) => action.status === "failed");
+      if (failed) {
+        throw new StageFailure("desktop", failed.diagnostics ?? failed.reason);
       }
     }
 

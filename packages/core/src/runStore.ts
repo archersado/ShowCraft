@@ -1,5 +1,6 @@
 import {
   DomainValidationError,
+  demoActionsSchema,
   entryPointCandidateSchema,
   evidencePackSchema,
   gateResultSchema,
@@ -8,6 +9,7 @@ import {
   runRecordSchema,
   scenePlanSchema,
   type EntryPointCandidate,
+  type DemoActions,
   type EvidencePack,
   type GateResult,
   type ReleaseBrief,
@@ -27,12 +29,13 @@ import { parseWithSchema, stableJsonBytes } from "./serialization.js";
 
 /** Stages whose artifacts the release pipeline persists. Evidence and gate run
  * only when the corresponding ports are provided; the mock pipeline skips both. */
-export type RunStage = "release" | "evidence" | "gate" | "scenePlan" | "manifest";
+export type RunStage = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "manifest";
 
 export const runStageOrder: readonly RunStage[] = [
   "release",
   "evidence",
   "gate",
+  "desktop",
   "scenePlan",
   "manifest",
 ];
@@ -41,6 +44,7 @@ export const stageFileNames: Record<RunStage, string> = {
   release: "release.json",
   evidence: "evidence.json",
   gate: "gate.json",
+  desktop: "actions.json",
   scenePlan: "scene.json",
   manifest: "manifest.json",
 };
@@ -85,6 +89,7 @@ export type StageArtifact =
   | { stage: "release"; value: ReleaseBrief }
   | { stage: "evidence"; value: { pack: EvidencePack; entryPoints: EntryPointCandidate[] } }
   | { stage: "gate"; value: GateResult }
+  | { stage: "desktop"; value: DemoActions }
   | { stage: "scenePlan"; value: ScenePlan }
   | { stage: "manifest"; value: RenderManifest };
 
@@ -156,6 +161,11 @@ export class RunStoreCore {
       if (!result.success) {
         throw new DomainValidationError(result.issues);
       }
+    } else if (artifact.stage === "desktop") {
+      const result = parseWithSchema(demoActionsChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
     } else if (artifact.stage === "scenePlan") {
       const result = parseWithSchema(scenePlanChecker, artifact.value);
       if (!result.success) {
@@ -217,5 +227,6 @@ const releaseBriefChecker = releaseBriefSchema;
 const evidencePackChecker = evidencePackSchema;
 const entryPointChecker = entryPointCandidateSchema;
 const gateChecker = gateResultSchema;
+const demoActionsChecker = demoActionsSchema;
 const scenePlanChecker = scenePlanSchema;
 const manifestChecker = renderManifestSchema;

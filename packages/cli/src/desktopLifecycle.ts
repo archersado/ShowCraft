@@ -192,7 +192,7 @@ function tailExcerpt(text: string, maxChars: number): string {
 
 export function createStartUpOSDesktopRunner(
   options: DesktopLifecycleOptions,
-): DesktopRunnerPort & { readonly state: RunnerState } {
+): DesktopRunnerPort & { readonly state: RunnerState; readonly processGroupId: number | null } {
   const rendererUrl = options.rendererUrl ?? DEFAULT_RENDERER_URL;
   const readinessTimeoutMs = options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
   const stopGraceMs = options.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
@@ -207,6 +207,10 @@ export function createStartUpOSDesktopRunner(
   const runner = {
     get state(): RunnerState {
       return state;
+    },
+
+    get processGroupId(): number | null {
+      return session?.pgid ?? null;
     },
 
     async start(): Promise<DesktopStartInfo> {
@@ -353,7 +357,7 @@ export function createStartUpOSDesktopRunner(
           cwd: root,
           detached: true,
           stdio: ["ignore", "pipe", "pipe"],
-          env: process.env,
+          env: { ...process.env, ELECTRON_RENDERER_URL: rendererUrl },
         });
       } catch (error) {
         rejectSession(

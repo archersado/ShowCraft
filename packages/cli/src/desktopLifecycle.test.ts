@@ -109,7 +109,7 @@ function serve(ignoreTerm) {
   const requested = portIndex !== -1 ? Number(process.argv[portIndex + 1]) : 0;
   const server = http.createServer((req, res) => {
     res.statusCode = 200;
-    res.end("fake-desktop-ready");
+    res.end(process.env.ELECTRON_RENDERER_URL || "missing-renderer-url");
   });
   server.listen(requested, "127.0.0.1", () => {
     const port = typeof server.address() === "object" ? server.address().port : requested;
@@ -280,9 +280,21 @@ describe("StartUpOS desktop lifecycle adapter (story 3.1)", () => {
     const info = await runner.start();
     expect(info.rendererUrl).toBe(`http://127.0.0.1:${port}`);
     expect(runner.state).toBe("ready");
+    expect(runner.processGroupId).toBeGreaterThan(0);
+    expect(
+      Number(
+        execFileSync("/bin/ps", ["-o", "pgid=", "-p", String(runner.processGroupId)], {
+          encoding: "utf8",
+        }).trim(),
+      ),
+    ).toBe(runner.processGroupId);
+    await expect(fetch(info.rendererUrl).then((response) => response.text())).resolves.toBe(
+      info.rendererUrl,
+    );
 
     await expect(runner.stop()).resolves.toBeUndefined();
     expect(runner.state).toBe("stopped");
+    expect(runner.processGroupId).toBeNull();
     await expect(runner.stop()).resolves.toBeUndefined(); // idempotent
   }, 20_000);
 

@@ -253,6 +253,119 @@ describe("runPipeline", () => {
     });
   });
 
+  it("records desktop actions after gate and before the scene plan", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "demo",
+      source: "fixture.md",
+      features: [{
+        id: "mock-feature",
+        title: "示例功能介绍",
+        narration: "示例旁白",
+        sourceRef: { sectionIndex: 1, sectionTitle: "示例功能介绍", startLine: 1, endLine: 3 },
+      }],
+    });
+    ports.codeEvidence = (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+    ports.confidenceGate = (release) => ({
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "no_evidence" as const,
+        automatable: false,
+        evidenceIds: [],
+      })),
+    });
+    ports.desktopDemo = (release, gate) =>
+      gate.decisions.map((decision) => ({
+        featureId: decision.featureId,
+        status: "skipped" as const,
+        reason: "no_evidence" as const,
+        sourceRef: release.features.find((feature) => feature.id === decision.featureId)!.sourceRef!,
+        evidenceIds: [],
+      }));
+    const store = new RunStoreCore("orch-desktop");
+
+    await runPipeline(ports, store);
+
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "actions.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("skips desktop when no desktop port is provided", async () => {
+    const store = new RunStoreCore("orch-no-desktop");
+    await runPipeline(mockPorts(), store);
+    expect(store.collectFiles().some((file) => file.fileName === "actions.json")).toBe(false);
+  });
+
+  it("fails at desktop after persisting failed actions and keeps earlier artifacts", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "demo",
+      source: "fixture.md",
+      features: [{
+        id: "mock-feature",
+        title: "示例功能介绍",
+        narration: "示例旁白",
+        sourceRef: { sectionIndex: 1, sectionTitle: "示例功能介绍", startLine: 1, endLine: 3 },
+      }],
+    });
+    ports.codeEvidence = (release) => ({
+      pack: {
+        releaseVersion: release.version,
+        entries: [{
+          id: "ev-1",
+          featureId: release.features[0]!.id,
+          kind: "commit",
+          reference: { location: "a".repeat(40) },
+          confidence: 0.9,
+        }],
+      },
+      entryPoints: [],
+    });
+    ports.confidenceGate = (release) => ({
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "eligible" as const,
+        automatable: true,
+        confidence: 0.9,
+        evidenceIds: ["ev-1"],
+      })),
+    });
+    ports.desktopDemo = (release, gate) => [{
+      featureId: release.features[0]!.id,
+      status: "failed",
+      reason: "action_failed",
+      sourceRef: release.features[0]!.sourceRef!,
+      evidenceIds: [...gate.decisions[0]!.evidenceIds],
+      diagnostics: "fixture unavailable",
+    }];
+    const store = new RunStoreCore("orch-desktop-fail");
+
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure?.stage).toBe("desktop");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "actions.json",
+      "run.json",
+    ]);
+  });
+
   it("attributes a gate port failure to the gate stage, keeping release and evidence artifacts", async () => {
     const ports = mockPorts();
     ports.codeEvidence = (release) => ({

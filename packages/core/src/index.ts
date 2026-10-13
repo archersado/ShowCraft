@@ -1,5 +1,10 @@
 export {
   confidenceSchema,
+  demoActionObservationsSchema,
+  demoActionReasonSchema,
+  demoActionRecordSchema,
+  demoActionsSchema,
+  demoActionStatusSchema,
   entryPointCandidateSchema,
   evidenceEntrySchema,
   evidenceKindSchema,
@@ -31,6 +36,8 @@ export {
 
 export type {
   EntryPointCandidate,
+  DemoActionRecord,
+  DemoActions,
   EvidenceEntry,
   EvidencePack,
   EvidenceReference,
@@ -79,6 +86,7 @@ export {
 export type {
   CodeEvidencePort,
   ConfidenceGatePort,
+  DesktopDemoPort,
   DesktopRunnerPort,
   DesktopStartInfo,
   EvidenceResult,

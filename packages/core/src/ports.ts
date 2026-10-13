@@ -1,4 +1,5 @@
 import type {
+  DemoActionRecord,
   EntryPointCandidate,
   EvidencePack,
   GateResult,
@@ -6,6 +7,12 @@ import type {
   RenderManifest,
   ScenePlan,
 } from "./domain.js";
+
+/** Execute the gate-qualified desktop demo and return one auditable record per decision. */
+export type DesktopDemoPort = (
+  release: ReleaseBrief,
+  gate: GateResult,
+) => Promise<DemoActionRecord[]> | DemoActionRecord[];
 
 /**
  * Provider ports for the mock release pipeline. Ports are plain function

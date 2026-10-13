@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DomainValidationError,
+  demoActionRecordSchema,
+  demoActionsSchema,
   entryPointCandidateSchema,
   evidencePackSchema,
   gateResultSchema,
@@ -183,6 +185,103 @@ describe("entryPointCandidateSchema", () => {
       evidenceIds: [],
     };
     expect(entryPointCandidateSchema.safeParse(candidate).success).toBe(false);
+  });
+});
+
+describe("desktop action schemas", () => {
+  const sourceRef = {
+    sectionIndex: 1,
+    sectionTitle: "感知与 IM 路由",
+    startLine: 5,
+    endLine: 11,
+  };
+
+  it("accepts an executed action with gate evidence and stable observations", () => {
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-1-im",
+        status: "executed",
+        reason: "eligible",
+        sourceRef,
+        evidenceIds: ["ev-1"],
+        observations: {
+          window_route_status: 200,
+          management_api_status: 200,
+          ask_user_candidate_present: true,
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects executed records without eligible evidence", () => {
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-1-im",
+        status: "executed",
+        reason: "action_failed",
+        sourceRef,
+        evidenceIds: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires no_evidence records to be skipped with an empty evidence list", () => {
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-2-section",
+        status: "skipped",
+        reason: "no_evidence",
+        sourceRef,
+        evidenceIds: ["ev-1"],
+      }).success,
+    ).toBe(false);
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-2-section",
+        status: "skipped",
+        reason: "no_evidence",
+        sourceRef,
+        evidenceIds: [],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects skipped and failed records with incompatible reasons", () => {
+    expect(demoActionRecordSchema.safeParse({
+      featureId: "section-1-im",
+      status: "skipped",
+      reason: "action_failed",
+      sourceRef,
+      evidenceIds: ["ev-1"],
+    }).success).toBe(false);
+    expect(demoActionRecordSchema.safeParse({
+      featureId: "section-1-im",
+      status: "failed",
+      reason: "unsupported_feature",
+      sourceRef,
+      evidenceIds: ["ev-1"],
+    }).success).toBe(false);
+  });
+
+  it("bounds diagnostics and observation value types", () => {
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-1-im",
+        status: "failed",
+        reason: "action_failed",
+        sourceRef,
+        evidenceIds: ["ev-1"],
+        observations: { unstable: { nested: true } },
+        diagnostics: "x".repeat(2049),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates the actions aggregate", () => {
+    expect(
+      demoActionsSchema.safeParse({ releaseVersion: "v0.3.3", threshold: 0.8, actions: [] })
+        .success,
+    ).toBe(true);
   });
 });
 
@@ -424,5 +523,100 @@ describe("gateResultSchema and gate ↔ scenePlan relations", () => {
         result.error.issues.some((issue) => issue.path.join(".").endsWith(".confidence")),
       ).toBe(true);
     }
+  });
+});
+
+describe("actions cross-artifact relations", () => {
+  const sourcedRelease = {
+    ...release,
+    features: release.features.map((feature, index) => ({
+      ...feature,
+      sourceRef: {
+        sectionIndex: index + 1,
+        sectionTitle: feature.title,
+        startLine: index * 5 + 1,
+        endLine: index * 5 + 5,
+      },
+    })),
+  };
+  const evidence = {
+    releaseVersion: release.version,
+    entries: [{
+      id: "ev-1",
+      featureId: "perception-routing",
+      kind: "commit" as const,
+      reference: { location: "a".repeat(40) },
+      confidence: 0.9,
+    }],
+  };
+  const gate = {
+    releaseVersion: release.version,
+    threshold: 0.8,
+    decisions: [{
+      featureId: "perception-routing",
+      reason: "eligible" as const,
+      automatable: true,
+      confidence: 0.9,
+      evidenceIds: ["ev-1"],
+    }],
+  };
+  const actions = {
+    releaseVersion: release.version,
+    threshold: 0.8,
+    actions: [{
+      featureId: "perception-routing",
+      status: "executed" as const,
+      reason: "eligible" as const,
+      sourceRef: sourcedRelease.features[0]!.sourceRef,
+      evidenceIds: ["ev-1"],
+      observations: { window_route_status: 200 },
+    }],
+  };
+
+  it("accepts exact release, gate, and evidence backlinks", () => {
+    expect(() => validateReleasePackageRelations({ release: sourcedRelease, evidence, gate, actions })).not.toThrow();
+  });
+
+  it("rejects sourceRef drift and unknown executed evidence", () => {
+    expect(() => validateReleasePackageRelations({
+      release: sourcedRelease,
+      evidence,
+      gate,
+      actions: {
+        ...actions,
+        actions: [{ ...actions.actions[0]!, sourceRef: { ...actions.actions[0]!.sourceRef, startLine: 99 } }],
+      },
+    })).toThrow(/sourceRef/);
+
+    expect(() => validateReleasePackageRelations({
+      release: sourcedRelease,
+      evidence: { ...evidence, entries: [] },
+      gate,
+      actions,
+    })).toThrow(/unknown evidence id/);
+  });
+
+  it("rejects evidenceIds that differ from the gate decision", () => {
+    expect(() => validateReleasePackageRelations({
+      release: sourcedRelease,
+      evidence,
+      gate,
+      actions: { ...actions, actions: [{ ...actions.actions[0]!, evidenceIds: ["ev-other"] }] },
+    })).toThrow(/gate decision evidenceIds/);
+  });
+
+  it("requires exactly one action for every gate decision", () => {
+    expect(() => validateReleasePackageRelations({
+      release: sourcedRelease,
+      evidence,
+      gate,
+      actions: { ...actions, actions: [] },
+    })).toThrow(/exactly one/);
+    expect(() => validateReleasePackageRelations({
+      release: sourcedRelease,
+      evidence,
+      gate,
+      actions: { ...actions, actions: [actions.actions[0]!, actions.actions[0]!] },
+    })).toThrow(/exactly one/);
   });
 });

@@ -194,6 +194,99 @@ export type GateDecision = z.infer<typeof gateDecisionSchema>;
 export type GateResult = z.infer<typeof gateResultSchema>;
 
 // ---------------------------------------------------------------------------
+// Desktop demo actions
+// ---------------------------------------------------------------------------
+
+export const demoActionStatusSchema = z.enum(["executed", "failed", "skipped"]);
+
+export const demoActionReasonSchema = z.enum([
+  "eligible",
+  "action_failed",
+  "no_evidence",
+  "below_threshold",
+  "unsupported_feature",
+  "port_owner_mismatch",
+  "stop_failed",
+]);
+
+export const demoActionObservationsSchema = z
+  .object({
+    window_route_status: z.number().int().min(100).max(599).optional(),
+    management_api_status: z.number().int().min(100).max(599).optional(),
+    management_shape_valid: z.boolean().optional(),
+    ask_user_candidate_present: z.boolean().optional(),
+    port_owner_in_group: z.boolean().optional(),
+  })
+  .strict();
+
+export const demoActionRecordSchema = z
+  .object({
+    featureId: featureIdSchema,
+    status: demoActionStatusSchema,
+    reason: demoActionReasonSchema,
+    sourceRef: featureSourceRefSchema,
+    evidenceIds: z.array(z.string().min(1)),
+    observations: demoActionObservationsSchema.optional(),
+    diagnostics: z.string().max(2048, "diagnostics must be at most 2048 characters").optional(),
+  })
+  .strict()
+  .superRefine((record, context) => {
+    if (
+      record.status === "executed" &&
+      (record.reason !== "eligible" ||
+        record.evidenceIds.length === 0 ||
+        record.observations === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "executed actions must be eligible, cite evidence, and include observations",
+      });
+    }
+    if (
+      record.reason === "no_evidence" &&
+      (record.status !== "skipped" || record.evidenceIds.length !== 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["evidenceIds"],
+        message: "no_evidence actions must be skipped and cite no evidence ids",
+      });
+    }
+    if (
+      record.status === "skipped" &&
+      !["no_evidence", "below_threshold", "unsupported_feature"].includes(record.reason)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "skipped actions must use a skip reason",
+      });
+    }
+    if (
+      record.status === "failed" &&
+      !["action_failed", "port_owner_mismatch", "stop_failed"].includes(record.reason)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "failed actions must use a failure reason",
+      });
+    }
+  });
+
+export const demoActionsSchema = z
+  .object({
+    releaseVersion: z.string().min(1, "actions release version must not be empty"),
+    threshold: confidenceSchema,
+    actions: z.array(demoActionRecordSchema),
+  })
+  .strict();
+
+export type DemoActionRecord = z.infer<typeof demoActionRecordSchema>;
+export type DemoActions = z.infer<typeof demoActionsSchema>;
+
+// ---------------------------------------------------------------------------
 // Scene plan
 // ---------------------------------------------------------------------------
 
@@ -280,6 +373,7 @@ export const releasePackageSchema = z
     evidence: evidencePackSchema.optional(),
     entryPoints: z.array(entryPointCandidateSchema).optional(),
     gate: gateResultSchema.optional(),
+    actions: demoActionsSchema.optional(),
     scenePlan: scenePlanSchema.optional(),
     manifest: renderManifestSchema.optional(),
     run: runRecordSchema.optional(),
@@ -359,6 +453,9 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
   for (const decision of packageValue.gate?.decisions ?? []) {
     assertReferences(release, decision.featureId, `gate.decisions[featureId=${decision.featureId}]`);
   }
+  for (const action of packageValue.actions?.actions ?? []) {
+    assertReferences(release, action.featureId, `actions.actions[featureId=${action.featureId}]`);
+  }
   for (const scene of packageValue.scenePlan?.scenes ?? []) {
     assertReferences(release, scene.featureId, `scenePlan.scenes[id=${scene.id}].featureId`);
   }
@@ -382,6 +479,82 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
         message: `does not match release version "${version}"`,
       },
     ]);
+  }
+  if (packageValue.actions && packageValue.actions.releaseVersion !== version) {
+    throw new DomainValidationError([
+      {
+        path: "actions.releaseVersion",
+        message: `does not match release version "${version}"`,
+      },
+    ]);
+  }
+
+  if (packageValue.actions) {
+    if (!packageValue.gate) {
+      throw new DomainValidationError([
+        { path: "actions", message: "desktop actions require a gate result" },
+      ]);
+    }
+    const features = new Map(release.features.map((feature) => [feature.id, feature]));
+    const evidenceIds = new Set(packageValue.evidence?.entries.map((entry) => entry.id) ?? []);
+    const gateDecisions = new Map(
+      packageValue.gate.decisions.map((decision) => [decision.featureId, decision]),
+    );
+    if (packageValue.actions.threshold !== packageValue.gate.threshold) {
+      throw new DomainValidationError([
+        { path: "actions.threshold", message: "does not match gate threshold" },
+      ]);
+    }
+    const actionCounts = new Map<string, number>();
+    for (const action of packageValue.actions.actions) {
+      actionCounts.set(action.featureId, (actionCounts.get(action.featureId) ?? 0) + 1);
+      const feature = features.get(action.featureId)!;
+      if (JSON.stringify(action.sourceRef) !== JSON.stringify(feature.sourceRef)) {
+        throw new DomainValidationError([
+          {
+            path: `actions.actions[featureId=${action.featureId}].sourceRef`,
+            message: "does not match the release feature sourceRef",
+          },
+        ]);
+      }
+      const decision = gateDecisions.get(action.featureId);
+      if (!decision) {
+        throw new DomainValidationError([
+          {
+            path: `actions.actions[featureId=${action.featureId}]`,
+            message: "has no corresponding gate decision",
+          },
+        ]);
+      }
+      if (JSON.stringify(action.evidenceIds) !== JSON.stringify(decision.evidenceIds)) {
+        throw new DomainValidationError([
+          {
+            path: `actions.actions[featureId=${action.featureId}].evidenceIds`,
+            message: "does not match the gate decision evidenceIds",
+          },
+        ]);
+      }
+      for (const evidenceId of action.evidenceIds) {
+        if (!evidenceIds.has(evidenceId)) {
+          throw new DomainValidationError([
+            {
+              path: `actions.actions[featureId=${action.featureId}].evidenceIds`,
+              message: `references unknown evidence id "${evidenceId}"`,
+            },
+          ]);
+        }
+      }
+    }
+    for (const decision of packageValue.gate.decisions) {
+      if (actionCounts.get(decision.featureId) !== 1) {
+        throw new DomainValidationError([
+          {
+            path: `actions.actions[featureId=${decision.featureId}]`,
+            message: "must contain exactly one record for each gate decision",
+          },
+        ]);
+      }
+    }
   }
   if (packageValue.scenePlan && packageValue.scenePlan.releaseVersion !== version) {
     throw new DomainValidationError([

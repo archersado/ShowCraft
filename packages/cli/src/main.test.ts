@@ -80,6 +80,23 @@ describe("parseDemoArgs", () => {
   it("rejects unsupported arguments", () => {
     expect(() => parseDemoArgs(["--unknown"])).toThrow(/Usage:/);
   });
+
+  it("accepts --desktop only together with --source", () => {
+    expect(parseDemoArgs(["--source", "release.md", "--desktop", "/startupos"])).toEqual({
+      source: "release.md",
+      desktopRoot: "/startupos",
+    });
+    expect(() => parseDemoArgs(["--desktop", "/startupos"])).toThrow(/requires --source/);
+  });
+
+  it("rejects programmatic desktop runs without a source before creating output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-desktop-usage-"));
+    temporaryPaths.push(root);
+    await expect(
+      runDemo({ outputRoot: root, runId: "invalid-desktop", desktopRoot: "/startupos" }),
+    ).rejects.toThrow(/requires --source/);
+    await expect(stat(join(root, "invalid-desktop"))).rejects.toThrow();
+  });
 });
 
 describe("pnpm demo", () => {

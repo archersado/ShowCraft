@@ -28,12 +28,14 @@ import {
 
 import { createRunDirectory, persistRunEvents } from "./runStore.js";
 import { collectCommits, collectDiffSample, discoverGitRepo, resolveTagRange } from "./gitEvidence.js";
+import { createStartUpOSDemoActions } from "./desktopActions.js";
 
 export type DemoOptions = {
   outputRoot?: string;
   runId?: string;
   cwd?: string;
   source?: string;
+  desktopRoot?: string;
 };
 
 export type DemoResult = {
@@ -42,6 +44,9 @@ export type DemoResult = {
 };
 
 export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
+  if (options.desktopRoot && !options.source) {
+    throw new Error("--desktop requires --source");
+  }
   const outputRoot = options.outputRoot ?? "runs";
   const runId = options.runId ?? `demo-${Date.now()}-${randomUUID().slice(0, 8)}`;
   validateRunId(runId);
@@ -63,6 +68,10 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     : undefined;
 
   const store = new RunStoreCore(runId);
+  const desktopDemo =
+    options.desktopRoot && options.source && codeEvidence && confidenceGate
+      ? createStartUpOSDemoActions({ startupOsRoot: options.desktopRoot })
+      : undefined;
   // CLI assembles the adapters; core only sees the ports.
   await runPipeline(
     {
@@ -71,9 +80,13 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       renderer: createMockRenderer(),
       ...(codeEvidence ? { codeEvidence } : {}),
       ...(confidenceGate ? { confidenceGate } : {}),
+      ...(desktopDemo ? { desktopDemo } : {}),
     },
     store,
   );
+
+  const runDirectory = await createRunDirectory(outputRoot, runId, { cwd: options.cwd });
+  await persistRunEvents(runDirectory, store.collectFiles());
 
   if (store.currentStatus !== "completed") {
     const failure = store.currentFailure;
@@ -81,9 +94,6 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       `Demo pipeline failed at ${failure?.stage ?? "unknown stage"}: ${failure?.reason ?? "no diagnostics"}`,
     );
   }
-
-  const runDirectory = await createRunDirectory(outputRoot, runId, { cwd: options.cwd });
-  await persistRunEvents(runDirectory, store.collectFiles());
 
   return { runDirectory, status: "completed" as const };
 }
@@ -217,10 +227,10 @@ const emptyEvidencePort: CodeEvidencePort = (release) => emptyEvidence(release);
 
 export function parseDemoArgs(
   args: readonly string[],
-): Pick<DemoOptions, "outputRoot" | "source"> {
+): Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot"> {
   const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
 
-  const parsed: Pick<DemoOptions, "outputRoot" | "source"> = {};
+  const parsed: Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot"> = {};
   for (let index = 0; index < normalizedArgs.length; index += 2) {
     const flag = normalizedArgs[index];
     const value = normalizedArgs[index + 1];
@@ -228,9 +238,14 @@ export function parseDemoArgs(
       parsed.outputRoot = value;
     } else if (flag === "--source" && value) {
       parsed.source = value;
+    } else if (flag === "--desktop" && value) {
+      parsed.desktopRoot = value;
     } else {
-      throw new Error("Usage: pnpm demo -- [--output <directory>] [--source <markdown-path>]");
+      throw new Error("Usage: pnpm demo -- [--output <directory>] [--source <markdown-path> [--desktop <startupos-root>]]");
     }
+  }
+  if (parsed.desktopRoot && !parsed.source) {
+    throw new Error("Usage: --desktop requires --source");
   }
   return parsed;
 }
