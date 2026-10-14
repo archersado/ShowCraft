@@ -3,7 +3,7 @@ title: '感知与 IM 路由的首个证据驱动演示路径'
 type: 'feature'
 ticket: '6'
 created: '2026-10-10'
-status: ready-for-dev
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
