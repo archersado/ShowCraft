@@ -16,7 +16,7 @@
 **Non-Goals:**
 
 - 不实现云队列、账号体系、发布渠道、远程协作审核或无人工发布。
-- 不读取或写入 StartUpOS 的秘密文件、工作树或 Git 历史。
+- 不读取或写入 StartUpOS 的秘密文件或工作树；Git 历史仅以只读 tag 区间查询方式使用（`code-evidence-discovery`）。
 - 不承诺每条 Changelog 文案都存在可录制 UI。
 
 ## Decisions
