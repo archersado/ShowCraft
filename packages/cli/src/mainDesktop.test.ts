@@ -11,19 +11,27 @@ const desktopFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("./desktopActions.js", () => ({
   createStartUpOSDemoActions: (options: unknown) => {
-    desktopFactory(options);
-    return desktopDemo;
+    const implementation = desktopFactory(options);
+    return typeof implementation === "function" ? implementation : desktopDemo;
   },
 }));
 
 import { runDemo } from "./main.js";
+import {
+  buildDesktopReleaseFixture,
+  cleanupDesktopFixtures,
+  fakeRecorder,
+  fakeRunner,
+  fixtureHttpServer,
+  ownedPortCommand,
+} from "./desktopFixtures.js";
 
-const SOURCE = "/Users/archersado/workspace/startupOS/docs/changes/releases/v0.3.3/changelog.md";
 const temporaryPaths: string[] = [];
 
 afterEach(async () => {
   desktopDemo.mockReset();
   desktopFactory.mockReset();
+  await cleanupDesktopFixtures();
   await Promise.all(temporaryPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -68,15 +76,52 @@ function recordsFor(
 }
 
 describe.runIf(process.platform !== "win32")("runDemo desktop composition", () => {
+  it("persists media from the real desktop adapter driven by canonical fixtures", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-desktop-real-adapter-"));
+    const fixture = await buildDesktopReleaseFixture();
+    const origin = await fixtureHttpServer();
+    temporaryPaths.push(root);
+    const actual = await vi.importActual<typeof import("./desktopActions.js")>(
+      "./desktopActions.js",
+    );
+    desktopFactory.mockImplementation((options: { startupOsRoot: string; runDirectory: string }) =>
+      actual.createStartUpOSDemoActions({
+        ...options,
+        runner: fakeRunner(origin),
+        command: ownedPortCommand,
+        recorder: fakeRecorder("success"),
+        recordingDurationSeconds: 1,
+        recordingGraceMs: 0,
+      }),
+    );
+
+    const result = await runDemo({
+      outputRoot: root,
+      runId: "desktop-real-adapter",
+      source: fixture.changelogPath,
+      desktopRoot: "/unused-by-fixture",
+    });
+
+    const actions = JSON.parse(await readFile(join(result.runDirectory, "actions.json"), "utf8"));
+    expect(actions.actions).toContainEqual(expect.objectContaining({
+      featureId: "section-1-im",
+      status: "executed",
+      media: { file: "recording-section-1-im.mov" },
+    }));
+    const media = await readFile(join(result.runDirectory, "recording-section-1-im.mov"));
+    expect(media.subarray(4, 8).toString("ascii")).toBe("ftyp");
+  }, 15_000);
+
   it("injects the desktop adapter and persists actions.json", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-desktop-compose-"));
+    const fixture = await buildDesktopReleaseFixture();
     temporaryPaths.push(root);
     desktopDemo.mockImplementation((release, gate) => recordsFor(release, gate));
 
     const result = await runDemo({
       outputRoot: root,
       runId: "desktop-success",
-      source: SOURCE,
+      source: fixture.changelogPath,
       desktopRoot: "/unused-by-mock",
     });
 
@@ -101,6 +146,7 @@ describe.runIf(process.platform !== "win32")("runDemo desktop composition", () =
 
   it("persists actions and run diagnostics before rejecting a failed desktop stage", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-desktop-failure-"));
+    const fixture = await buildDesktopReleaseFixture();
     temporaryPaths.push(root);
     desktopDemo.mockImplementation((release, gate) => recordsFor(release, gate, "recording_failed"));
 
@@ -108,7 +154,7 @@ describe.runIf(process.platform !== "win32")("runDemo desktop composition", () =
       runDemo({
         outputRoot: root,
         runId: "desktop-failure",
-        source: SOURCE,
+        source: fixture.changelogPath,
         desktopRoot: "/unused-by-mock",
       }),
     ).rejects.toThrow(/failed at desktop/);
