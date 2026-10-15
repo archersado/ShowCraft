@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -80,16 +80,45 @@ describe("parseDemoArgs", () => {
   it("rejects unsupported arguments", () => {
     expect(() => parseDemoArgs(["--unknown"])).toThrow(/Usage:/);
   });
+
+  it("accepts --desktop only together with --source", () => {
+    expect(parseDemoArgs(["--source", "release.md", "--desktop", "/startupos"])).toEqual({
+      source: "release.md",
+      desktopRoot: "/startupos",
+    });
+    expect(() => parseDemoArgs(["--desktop", "/startupos"])).toThrow(/requires --source/);
+  });
+
+  it("rejects programmatic desktop runs without a source before creating output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-desktop-usage-"));
+    temporaryPaths.push(root);
+    await expect(
+      runDemo({ outputRoot: root, runId: "invalid-desktop", desktopRoot: "/startupos" }),
+    ).rejects.toThrow(/requires --source/);
+    await expect(stat(join(root, "invalid-desktop"))).rejects.toThrow();
+  });
 });
 
 describe("pnpm demo", () => {
   it("runs the root command and reports a completed run", async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), "showcraft-cli-command-"));
     temporaryPaths.push(outputRoot);
-    const pnpmEntrypoint = process.env.npm_execpath;
-
-    expect(pnpmEntrypoint).toBeTruthy();
-    const { stdout } = await execFileAsync(pnpmEntrypoint!, ["demo", "--", "--output", outputRoot], {
+    // npm_execpath points at the package-manager JS entry only when vitest
+    // is launched THROUGH that package manager — npm sets npm-cli.js, whose
+    // `demo` command does not exist. Run the pnpm entrypoint explicitly and
+    // skip gracefully when no JS entrypoint exists in this environment.
+    const nodeLibDir = join(dirname(dirname(process.execPath)), "lib", "node_modules");
+    const pnpmEntrypoint = join(nodeLibDir, "corepack", "dist", "pnpm.js");
+    if (
+      !(await stat(pnpmEntrypoint).then(() => true).catch(() => false)) &&
+      !(process.env.npm_execpath?.endsWith(".js") ?? false)
+    ) {
+      return;
+    }
+    const entry = (await stat(pnpmEntrypoint).then(() => true).catch(() => false))
+      ? pnpmEntrypoint
+      : process.env.npm_execpath!;
+    const { stdout } = await execFileAsync(process.execPath, [entry, "demo", "--", "--output", outputRoot], {
       cwd: process.cwd(),
     });
     const runDirectory = stdout.match(/^Run directory: (.+)$/m)?.[1];
