@@ -213,6 +213,87 @@ describe("desktop action schemas", () => {
     ).toBe(true);
   });
 
+  it("accepts media for executed actions and failed action evidence", () => {
+    const base = {
+      featureId: "section-1-im",
+      sourceRef,
+      evidenceIds: ["ev-1"],
+      observations: { window_route_status: 200 },
+      media: { file: "recording-section-1-im.mov" },
+    };
+    expect(
+      demoActionRecordSchema.safeParse({ ...base, status: "executed", reason: "eligible" }).success,
+    ).toBe(true);
+    expect(
+      demoActionRecordSchema.safeParse({
+        ...base,
+        status: "failed",
+        reason: "action_failed",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects media on recording failures and skipped actions", () => {
+    const base = {
+      featureId: "section-1-im",
+      sourceRef,
+      evidenceIds: ["ev-1"],
+      media: { file: "recording-section-1-im.mov" },
+    };
+    expect(
+      demoActionRecordSchema.safeParse({
+        ...base,
+        status: "failed",
+        reason: "recording_failed",
+      }).success,
+    ).toBe(false);
+    expect(
+      demoActionRecordSchema.safeParse({
+        ...base,
+        status: "skipped",
+        reason: "unsupported_feature",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects media file paths and accepts recording failures without media", () => {
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-1-im",
+        status: "failed",
+        reason: "recording_failed",
+        sourceRef,
+        evidenceIds: ["ev-1"],
+        diagnostics: "screen recording permission denied",
+      }).success,
+    ).toBe(true);
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-1-im",
+        status: "executed",
+        reason: "eligible",
+        sourceRef,
+        evidenceIds: ["ev-1"],
+        observations: { window_route_status: 200 },
+        media: { file: "../recording.mov" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([".", ".."])('rejects the directory component media file "%s"', (file) => {
+    expect(
+      demoActionRecordSchema.safeParse({
+        featureId: "section-1-im",
+        status: "executed",
+        reason: "eligible",
+        sourceRef,
+        evidenceIds: ["ev-1"],
+        observations: { window_route_status: 200 },
+        media: { file },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects executed records without eligible evidence", () => {
     expect(
       demoActionRecordSchema.safeParse({
