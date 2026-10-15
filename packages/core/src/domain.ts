@@ -202,6 +202,7 @@ export const demoActionStatusSchema = z.enum(["executed", "failed", "skipped"]);
 export const demoActionReasonSchema = z.enum([
   "eligible",
   "action_failed",
+  "recording_failed",
   "no_evidence",
   "below_threshold",
   "unsupported_feature",
@@ -227,6 +228,16 @@ export const demoActionRecordSchema = z
     sourceRef: featureSourceRefSchema,
     evidenceIds: z.array(z.string().min(1)),
     observations: demoActionObservationsSchema.optional(),
+    media: z
+      .object({
+        file: z
+          .string()
+          .min(1)
+          .regex(/^[A-Za-z0-9._-]+$/, "media file must be a file name")
+          .refine((file) => file !== "." && file !== "..", "media file must not be a directory"),
+      })
+      .strict()
+      .optional(),
     diagnostics: z.string().max(2048, "diagnostics must be at most 2048 characters").optional(),
   })
   .strict()
@@ -265,12 +276,25 @@ export const demoActionRecordSchema = z
     }
     if (
       record.status === "failed" &&
-      !["action_failed", "port_owner_mismatch", "stop_failed"].includes(record.reason)
+      !["action_failed", "recording_failed", "port_owner_mismatch", "stop_failed"].includes(
+        record.reason,
+      )
     ) {
       context.addIssue({
         code: "custom",
         path: ["reason"],
         message: "failed actions must use a failure reason",
+      });
+    }
+    if (
+      record.media !== undefined &&
+      !(record.status === "executed" ||
+        (record.status === "failed" && record.reason === "action_failed"))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["media"],
+        message: "media is allowed only for executed actions or failed action evidence",
       });
     }
   });

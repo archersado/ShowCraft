@@ -67,10 +67,14 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     ? (release, evidence) => applyConfidenceGate(release, evidence.pack, evidence.entryPoints, gateThreshold)
     : undefined;
 
+  const runDirectory = await createRunDirectory(outputRoot, runId, { cwd: options.cwd });
   const store = new RunStoreCore(runId);
   const desktopDemo =
     options.desktopRoot && options.source && codeEvidence && confidenceGate
-      ? createStartUpOSDemoActions({ startupOsRoot: options.desktopRoot })
+      ? createStartUpOSDemoActions({
+          startupOsRoot: options.desktopRoot,
+          runDirectory,
+        })
       : undefined;
   // CLI assembles the adapters; core only sees the ports.
   await runPipeline(
@@ -85,7 +89,6 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     store,
   );
 
-  const runDirectory = await createRunDirectory(outputRoot, runId, { cwd: options.cwd });
   await persistRunEvents(runDirectory, store.collectFiles());
 
   if (store.currentStatus !== "completed") {
