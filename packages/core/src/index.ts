@@ -1,11 +1,20 @@
 export {
   confidenceSchema,
+  demoActionObservationsSchema,
+  demoActionReasonSchema,
+  demoActionRecordSchema,
+  demoActionsSchema,
+  demoActionStatusSchema,
   entryPointCandidateSchema,
   evidenceEntrySchema,
   evidenceKindSchema,
   evidencePackSchema,
   evidenceReferenceSchema,
   featureIdSchema,
+  featureSourceRefSchema,
+  gateDecisionSchema,
+  gateReasonSchema,
+  gateResultSchema,
   narrationSourceSchema,
   releaseFeatureSchema,
   releaseBriefSchema,
@@ -27,9 +36,15 @@ export {
 
 export type {
   EntryPointCandidate,
+  DemoActionRecord,
+  DemoActions,
   EvidenceEntry,
   EvidencePack,
   EvidenceReference,
+  FeatureSourceRef,
+  GateDecision,
+  GateReason,
+  GateResult,
   ReleaseBrief,
   ReleaseFeature,
   ReleasePackage,
@@ -62,15 +77,43 @@ export {
 export type { RunStage, RunStoreEvent, RunStoreFile, StageArtifact, StageFailure } from "./runStore.js";
 
 export {
+  createMockCodeEvidence,
   createMockReleaseSource,
   createMockRenderer,
   createMockScenePlanner,
 } from "./ports.js";
 
-export type { ReleaseSourcePort, RendererPort, ScenePlannerPort } from "./ports.js";
+export type {
+  CodeEvidencePort,
+  ConfidenceGatePort,
+  DesktopDemoPort,
+  DesktopRunnerPort,
+  DesktopStartInfo,
+  EvidenceResult,
+  ReleaseSourcePort,
+  RendererPort,
+  ScenePlanningContext,
+  ScenePlannerPort,
+} from "./ports.js";
+
+export { DesktopRunnerError } from "./ports.js";
+export type { DesktopRunnerErrorPhase } from "./ports.js";
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
+
+export { applyConfidenceGate, gateThreshold } from "./confidenceGate.js";
+
+export {
+  collectTokens,
+  deriveEntryCandidates,
+  matchCommitsToFeatures,
+  parseScope,
+} from "./evidenceMatching.js";
+
+export type { CommitRecord, EvidenceWeights } from "./evidenceMatching.js";
+
+export { normalizeSectionsToFeatures, slugifyTitle } from "./releaseMapping.js";
 
 export {
   isSecretPath,
