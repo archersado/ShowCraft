@@ -1,0 +1,59 @@
+[[entry]]
+id = 1
+type = "story"
+title = "CLI release 来源输入与安全解析"
+description = "实现 CLI --source 本地 Markdown/GitHub URL 校验与 StartUpOS release 路径解析，输出带来源与版本的可追溯数据。"
+verify = "v0.3.3 changelog 可解析出版本与 section；目录、非 Markdown、秘密文件与不存在来源被拒绝且原因明确；无 --source 时 demo 行为不变。"
+covers = ["R1"]
+after = []
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/specs/release-source-ingestion/spec.md",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#2-发布来源与代码证据",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Changelog section 到 feature 映射"
+description = "实现 Changelog section 到 feature 的归一化与来源映射，使每项 feature 可回链原始段落。"
+verify = "v0.3.3 的每个 section 归一化为 feature 且可回链原始段落与行号范围。"
+covers = ["R1"]
+after = [1]
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/specs/release-source-ingestion/spec.md",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#2-发布来源与代码证据",
+]
+
+[[entry]]
+id = 3
+type = "story"
+title = "只读 Git 证据检索与置信度"
+description = "实现只读 Git 提交/diff/符号证据检索和置信度输出，形成 feature 到 commit/code 位置的证据包。"
+verify = "对 v0.3.3 的感知与 IM 路由 feature 检索出可回链 commit/diff/符号的入口候选，每项带置信度。"
+covers = ["R2", "R3"]
+after = [2]
+hitl = false
+risk = "high"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/specs/code-evidence-discovery/spec.md",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#2-发布来源与代码证据",
+]
+
+[[entry]]
+id = 4
+type = "story"
+title = "低置信度门禁与人工补充"
+description = "实现低置信度门禁与人工补充输出，无代码证据或低于阈值的候选不产生自动化动作。"
+verify = "无证据 feature 被降级为人工补充或旁白，不会进入桌面自动化。"
+covers = ["R3", "R4"]
+after = [3]
+hitl = false
+risk = "medium"
+references = [
+  "openspec/changes/showcraft-release-video-mvp/specs/code-evidence-discovery/spec.md",
+  "openspec/changes/showcraft-release-video-mvp/tasks.md#2-发布来源与代码证据",
+]
