@@ -3,7 +3,7 @@ title: '桌面路径 mock/fixture 测试边界与无凭据回归'
 type: 'feature'
 ticket: '8'
 created: '2026-10-15'
-status: draft
+status: ready-for-dev
 route: 'full'
 route_source: 'auto'
 review: ''
