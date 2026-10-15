@@ -3,7 +3,7 @@ title: 'Edge TTS zh-CN-XiaoxiaoNeural adapter 与中文时序输出'
 type: 'feature'
 ticket: '9'
 created: '2026-10-15'
-status: draft
+status: ready-for-dev
 baseline_revision: a99c2d5c7df0026f358d8a3ad3df2e4e060c9db5
 route: 'full'
 route_source: 'auto'
