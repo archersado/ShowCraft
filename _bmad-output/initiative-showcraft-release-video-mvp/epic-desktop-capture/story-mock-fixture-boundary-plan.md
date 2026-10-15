@@ -3,12 +3,17 @@ title: '桌面路径 mock/fixture 测试边界与无凭据回归'
 type: 'feature'
 ticket: '8'
 created: '2026-10-15'
-status: ready-for-dev
+status: built
+baseline_revision: 8c5e77087cbbb039fcc252e07f0c61ce40b2921f
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'thorough'
+review_source: 'auto'
+lenses_ran:
+  - 'blind-hunter'
+  - 'edge-case-hunter'
+  - 'verification-gap'
+  - 'intent-alignment'
 review_loop_iteration: 0
 context:
   - 'openspec/changes/showcraft-release-video-mvp/specs/desktop-demo-capture/spec.md'
@@ -73,12 +78,12 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/cli/src/desktopFixtures.ts` -- 新建共享 fixture 构建器（fixture 仓库+changelog、fixture HTTP、fake runner/recorder/命令桩）；完成条件：`pnpm typecheck` 通过；新建 `desktopFixtures.test.ts` 冒烟用例（fixture 仓库构建 → runDemo → gate 判 eligible；两次 run evidence.json/gate.json 字节相同——规划期探针已验证该断言可全绿）。
-- [ ] `packages/cli/src/desktopActions.test.ts` -- fixture 迁移 + 新增用例；完成条件：既有 27 用例改导入后零语义变化全绿；新增观测预算对齐用例（转发值断言 + 延迟 fixture action_failed 断言）与 diagnostics phase 前缀断言全绿。
-- [ ] `packages/cli/src/desktopActions.ts` -- 观测超时推导（决策 4 落地，唯一产品改动）；完成条件：`pnpm typecheck` 通过；录制未激活路径 30_000 缺省行为有断言锁定；显式 `requestTimeoutMs` 优先有断言锁定；既有测试零回归。
-- [ ] `packages/cli/src/releaseSource.test.ts` + `mainDesktop.test.ts` -- 环境敏感用例收敛（决策 3 落地）；完成条件：fixture 层用例不依赖 `/Users/archersado/workspace/startupOS` 全绿；真实仓库用例在 `existsSync` 为假时跳过（本机为真时全绿——收尾机器双态各验一次）；mock 4 文件 / `--source` 5 文件既有字节断言零回归。
-- [ ] 回归套件审计 -- I/O 矩阵 1–19 每行在测试代码中可定位（用例名或文件引用写入计划 Implementation Notes 对照表）；完成条件：`pnpm test` 全绿且新增用例不依赖真实 StartUpOS/GUI/TCC/网络，总时长增量 < 15s。
-- [ ] 备案收敛复核 -- boundedDiagnostics 截断保留 `phase=<phase>` 首行（决策 5 落地）；完成条件：truncation 路径新断言（diagnostics 以 `phase=` 开头且长度 ≤2048）全绿；`failure.stage` 归因断言不变。
+- [x] `packages/cli/src/desktopFixtures.ts` -- 新建共享 fixture 构建器（fixture 仓库+changelog、fixture HTTP、fake runner/recorder/命令桩）；完成条件：`pnpm typecheck` 通过；新建 `desktopFixtures.test.ts` 冒烟用例（fixture 仓库构建 → runDemo → gate 判 eligible；两次 run evidence.json/gate.json 字节相同——规划期探针已验证该断言可全绿）。
+- [x] `packages/cli/src/desktopActions.test.ts` -- fixture 迁移 + 新增用例；完成条件：既有 27 用例改导入后零语义变化全绿；新增观测预算对齐用例（转发值断言 + 延迟 fixture action_failed 断言）与 diagnostics phase 前缀断言全绿。
+- [x] `packages/cli/src/desktopActions.ts` -- 观测超时推导（决策 4 落地，唯一产品改动）；完成条件：`pnpm typecheck` 通过；录制未激活路径 30_000 缺省行为有断言锁定；显式 `requestTimeoutMs` 优先有断言锁定；既有测试零回归。
+- [x] `packages/cli/src/releaseSource.test.ts` + `mainDesktop.test.ts` -- 环境敏感用例收敛（决策 3 落地）；完成条件：fixture 层用例不依赖 `/Users/archersado/workspace/startupOS` 全绿；真实仓库用例在 `existsSync` 为假时跳过（本机为真时全绿——收尾机器双态各验一次）；mock 4 文件 / `--source` 5 文件既有字节断言零回归。
+- [x] 回归套件审计 -- I/O 矩阵 1–19 每行在测试代码中可定位（用例名或文件引用写入计划 Implementation Notes 对照表）；完成条件：`pnpm test` 全绿且新增用例不依赖真实 StartUpOS/GUI/TCC/网络，总时长增量 < 15s。
+- [x] 备案收敛复核 -- boundedDiagnostics 截断保留 `phase=<phase>` 首行（决策 5 落地）；完成条件：truncation 路径新断言（diagnostics 以 `phase=` 开头且长度 ≤2048）全绿；`failure.stage` 归因断言不变。
 
 **Acceptance Criteria:**
 - Given 不含 `/Users/archersado/workspace/startupOS` 的干净机器，when `pnpm test`，then 全部用例通过（真实 StartUpOS opt-in 块自动跳过，其余全绿）——本规划期已实测等价条件（见 Design Notes 实测记录），实施后以实施期实测为准。
@@ -90,9 +95,57 @@ context:
 
 ## Implementation Notes
 
+实施完成（2026-10-15）。新增 `desktopFixtures.ts` 统一管理临时 Git 仓库、loopback HTTP server、runner、recorder、端口命令和录屏字节 fixture；fixture 不经 `index.ts` 导出。观测预算仅在录屏激活且未显式传值时按 `floor(duration×1000/4)` 推导；非录屏路径仍为 30 秒，显式值优先。超长 `DesktopRunnerError` 诊断保留 `phase=` 首行且总长不超过 2048。
+
+| 矩阵 | 自动化覆盖（本次 `pnpm test` 已运行） |
+|---|---|
+| 1 | `desktopActions.test.ts` “records an eligible action…”；`mainDesktop.test.ts` “injects the desktop adapter…” |
+| 2–3 | `desktopActions.test.ts` “maps recorder failure…”；`mainDesktop.test.ts` failed desktop stage |
+| 4 | `desktopActions.test.ts` invalid missing/empty/corrupt table |
+| 5 | `desktopActions.test.ts` management 503 / invalid shape / failed action media |
+| 6 | `desktopActions.test.ts` stop failure + failed-action media/stop failure |
+| 7 | `desktopActions.test.ts` listener outside runner process group |
+| 8 | `e2e.test.ts` mock 4-file set；core `orchestrator.test.ts` desktop omission |
+| 9 | `desktopActions.test.ts` all ineligible / below threshold |
+| 10 | `main.test.ts` desktop/source flag contract |
+| 11 | CLI `e2e.test.ts` mock byte stability + 4-file set |
+| 12 | `releaseSource.test.ts` fixture evidence/gate byte stability + five-artifact contract |
+| 13 | `desktopActions.test.ts` repeated observations + independent recording directories |
+| 14 | core `domain.test.ts` media refine；desktop failure tests assert no media except action-failure evidence |
+| 15 | `mainDesktop.test.ts` failed run artifacts/stage；`desktopActions.test.ts` bounded phase diagnostics |
+| 16 | `desktopActions.test.ts` non-macOS recording failure |
+| 17 | `desktopActions.test.ts` valid/missing/hanging timeout recorder cases + forwarded recorder timeout |
+| 18 | `desktopActions.test.ts` 30-second inactive default / quarter-window timeout / explicit override |
+| 19 | `desktopLifecycle.test.ts` 12 lifecycle matrix tests |
+
+验证：`pnpm build`、`pnpm lint`、`pnpm typecheck`、`openspec validate showcraft-release-video-mvp --strict` 全部通过；review 修正后的正常本机 `pnpm test` 为 20 files / 252 tests 全绿（8.57s）。将真实仓库常量临时替换为不存在路径后再次全量运行为 20 files / 247 passed / 5 opt-in skipped（7.96s），随后已恢复常量，证明干净机器路径全绿且跳过行为生效。
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+| ID | Verdict / route | Evidence |
+|---|---|---|
+| BH-1 | medium / patch | `desktopFixtures.ts` is included by the production CLI tsconfig yet imports `vitest`; the emitted module therefore has an undeclared runtime test-framework dependency. |
+| BH-2 | low / reject | Separate fixture repositories can receive different commit hashes, but the approved byte contract explicitly compares two runs of the same repository; semantic repeatability is intact and fixed Git dates add machinery outside that contract. |
+| BH-3 | medium / patch | Global `commit.gpgSign`, `tag.gpgSign`, or hooks can make the supposedly self-contained fixture fail on a clean machine; fixture Git commands must neutralize those settings. |
+| BH-4 | low / patch | `decisions: null` is currently replaced by the valid default because of `??`, preventing the `unknown` fixture input from representing this malformed response. |
+| BH-5 | low / patch | `ownedPortCommand` accepts any non-`lsof` executable and ignores arguments, so wrong production command construction could pass tests. |
+| BH-6 | low / reject | The recorder fixture is intentionally used by the approved one-second recording tests; parameterizing duration is not needed for current behavior and adds fixture API complexity. |
+| BH-7 | medium / patch | The inactive-default test proves only `timeout > 300ms`, not the promised exact `30_000ms` selection. |
+| BH-8 | medium / patch | The explicit-timeout test proves only `timeout > 300ms`, not that caller value `500ms` is forwarded unchanged. |
+| BH-9 | false / reject | The implementation intentionally requires both output directory and recorder; the two asymmetric states already remain non-recording states and no bad current outcome was demonstrated. |
+| BH-10 | low / patch | Delayed fixture callbacks are not tracked; the 250ms timeout/300ms response case can leave a retry callback scheduled after server cleanup. |
+| EC-1 | medium / patch | Same verified production-build Vitest dependency as BH-1. |
+| EC-2 | low / patch | The loopback fixture does not reject a pre-listen server error, so rare bind/setup failures are not settled cleanly. |
+| EC-3 | low / patch | A five-argument recorder call treats device id `1` as an output path; exact argument count must be checked. |
+| EC-4 | low / patch | Empty-string `runDirectory` is truthy for timeout selection by `!== undefined` but falsy for actual recording, shortening observation with no recording active. |
+| EC-5 | false / reject | Generic observation/recording errors have no lifecycle phase to preserve; the approved `phase=` guarantee applies to `DesktopRunnerError` diagnostics. |
+| VG-1 | medium / patch | Repository search confirms there is no exact observation of the inactive `30_000` or explicit `500` HTTP timeout values; this duplicates BH-7/BH-8. |
+| VG-2 | medium / patch | On simultaneous oversized start failure and stop failure, the already bounded phase-prefixed string is generically bounded again and loses `phase=`; no combination test exists. |
+| IA-1 | medium / patch | Current tests split source pipeline, desktop adapter, and persistence across three surfaces; none runs `runDemo` through the real adapter with canonical fake I/O and verifies the media file, despite the approved end-to-end matrix row. |
+| IA-2 | false / reject | The approved plan explicitly selected the four-request-slot formula rather than a new action-level deadline object; the diff implements that selected reading. |
+| IA-3 | false / reject | The approved plan requires an auditable mapping plus `pnpm test`, not a new monolithic matrix file; the Implementation Notes mapping satisfies that surface. |
 
 ## Design Notes
 

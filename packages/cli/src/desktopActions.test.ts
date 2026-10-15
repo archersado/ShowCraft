@@ -1,14 +1,24 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
-import { tmpdir } from "node:os";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { Socket } from "node:net";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DesktopRunnerError, stableJsonBytes, type DesktopRunnerPort, type GateResult, type ReleaseBrief } from "@showcraft/core";
+import { DesktopRunnerError, stableJsonBytes, type GateResult, type ReleaseBrief } from "@showcraft/core";
 
 import { createStartUpOSDemoActions } from "./desktopActions.js";
+import {
+  cleanupDesktopFixtures,
+  fakeRecorder as recorder,
+  fakeRunner,
+  fixtureHttpServer as fixture,
+  ownedPortCommand as ownedPort,
+  recordingDirectory,
+  validRecording,
+} from "./desktopFixtures.js";
+
+afterEach(cleanupDesktopFixtures);
 
 const release: ReleaseBrief = {
   version: "v0.3.3",
@@ -44,110 +54,6 @@ const gate: GateResult = {
     { featureId: "section-3-agent", reason: "eligible", automatable: true, confidence: 0.9, evidenceIds: ["ev-agent"] },
   ],
 };
-
-const servers: Server[] = [];
-const temporaryPaths: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
-  await Promise.all(temporaryPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
-});
-
-async function fixture(
-  options: { managementStatus?: number; managementSuccess?: boolean; decisions?: unknown } = {},
-): Promise<string> {
-  const server = createServer((request, response) => {
-    if (request.url?.startsWith("/window")) {
-      response.writeHead(200).end("ready");
-      return;
-    }
-    if (request.url === "/api/perception/management") {
-      response.writeHead(options.managementStatus ?? 200, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        success: options.managementSuccess ?? true,
-        data: {
-          decisions: options.decisions ?? [{ candidateKeys: ["ask_user_to_choose_target", "role-agent"] }],
-        },
-      }));
-      return;
-    }
-    response.writeHead(404).end();
-  });
-  servers.push(server);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("fixture did not bind");
-  return `http://127.0.0.1:${address.port}`;
-}
-
-function fakeRunner(
-  origin: string,
-  options: { startError?: unknown; stopError?: unknown; onStop?: () => void } = {},
-) {
-  let stops = 0;
-  const runner: DesktopRunnerPort & { readonly processGroupId: number; readonly stops: number } = {
-    processGroupId: 4242,
-    get stops() {
-      return stops;
-    },
-    async start() {
-      if ("startError" in options) throw options.startError;
-      return { rendererUrl: `${origin}/window?windowType=sense-center` };
-    },
-    async stop() {
-      stops += 1;
-      options.onStop?.();
-      if ("stopError" in options) throw options.stopError;
-    },
-  };
-  return runner;
-}
-
-const ownedPort = async (file: string): Promise<string> => file === "lsof" ? "99\n" : " 4242\n";
-
-const validRecording = Buffer.from([0, 0, 0, 20, ...Buffer.from("ftypqt  ")]);
-
-async function recordingDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "showcraft-recording-"));
-  temporaryPaths.push(directory);
-  return directory;
-}
-
-function recorder(
-  mode:
-    | "success"
-    | "failure"
-    | "missing"
-    | "empty"
-    | "corrupt"
-    | "hang"
-    | "timed-out-valid"
-    | "timed-out-missing",
-) {
-  return async (file: string, args: readonly string[]): Promise<string> => {
-    expect(file).toBe("/usr/sbin/screencapture");
-    expect(args.slice(0, 6)).toEqual(["-v", "-V", "1", "-D", "1", args[5]]);
-    const output = args.at(-1)!;
-    if (mode === "failure") {
-      const error = new Error("Command failed: permission denied") as Error & {
-        code: number;
-        stderr: string;
-      };
-      error.code = 1;
-      error.stderr = "screen capture permission denied";
-      throw error;
-    }
-    if (mode === "missing") return "";
-    if (mode === "hang") return new Promise<string>(() => undefined);
-    if (mode === "empty") await writeFile(output, Buffer.alloc(0));
-    if (mode === "corrupt") await writeFile(output, "not-a-movie", "utf8");
-    if (mode === "success" || mode === "timed-out-valid") await writeFile(output, validRecording);
-    if (mode === "timed-out-valid" || mode === "timed-out-missing") {
-      throw new Error("recording timed out after 1000ms");
-    }
-    return "";
-  };
-}
 
 describe("createStartUpOSDemoActions", () => {
   it("rejects recording timeouts outside Node's supported timer range", () => {
@@ -531,6 +437,77 @@ describe("createStartUpOSDemoActions", () => {
     expect(recorderProcess?.signalCode).toBe("SIGKILL");
   });
 
+  it("forwards the exact 30-second observation default when recording is inactive", async () => {
+    const timeout = vi.spyOn(Socket.prototype, "setTimeout");
+    const fake = vi.fn(recorder("success"));
+    try {
+      const origin = await fixture();
+      const demo = createStartUpOSDemoActions({
+        startupOsRoot: "/unused",
+        runDirectory: "",
+        runner: fakeRunner(origin),
+        command: ownedPort,
+        recorder: fake,
+        recordingDurationSeconds: 1,
+      });
+
+      expect((await demo(release, gate)).find((action) => action.featureId === "section-1-im"))
+        .toMatchObject({ status: "executed", reason: "eligible" });
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      expect(fake).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("bounds observation requests to one quarter of the active recording window", async () => {
+    const origin = await fixture({ managementDelayMs: 300 });
+    const runDirectory = await recordingDirectory();
+    const demo = createStartUpOSDemoActions({
+      startupOsRoot: "/unused",
+      runDirectory,
+      runner: fakeRunner(origin),
+      command: ownedPort,
+      recorder: recorder("success"),
+      recordingDurationSeconds: 1,
+      recordingGraceMs: 0,
+    });
+
+    const action = (await demo(release, gate)).find(
+      (candidate) => candidate.featureId === "section-1-im",
+    );
+    expect(action).toMatchObject({
+      status: "failed",
+      reason: "action_failed",
+      media: { file: "recording-section-1-im.mov" },
+    });
+    expect(action?.diagnostics).toContain("request timed out after 250ms");
+  });
+
+  it("prefers an explicit observation timeout over the recording-derived budget", async () => {
+    const timeout = vi.spyOn(Socket.prototype, "setTimeout");
+    const origin = await fixture({ managementDelayMs: 300 });
+    const runDirectory = await recordingDirectory();
+    const demo = createStartUpOSDemoActions({
+      startupOsRoot: "/unused",
+      runDirectory,
+      runner: fakeRunner(origin),
+      command: ownedPort,
+      recorder: recorder("success"),
+      recordingDurationSeconds: 1,
+      recordingGraceMs: 0,
+      requestTimeoutMs: 500,
+    });
+
+    try {
+      expect((await demo(release, gate)).find((action) => action.featureId === "section-1-im"))
+        .toMatchObject({ status: "executed", reason: "eligible" });
+      expect(timeout).toHaveBeenCalledWith(500);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it("fails when the management response lacks decision candidateKeys", async () => {
     const origin = await fixture({ decisions: [{}] });
     const demo = createStartUpOSDemoActions({
@@ -564,6 +541,15 @@ describe("createStartUpOSDemoActions", () => {
       command: ownedPort,
     });
     expect((await malformedDemo(release, gate)).find((action) => action.featureId === "section-1-im"))
+      .toMatchObject({ status: "failed", observations: { management_shape_valid: false } });
+
+    const nullOrigin = await fixture({ decisions: null });
+    const nullDemo = createStartUpOSDemoActions({
+      startupOsRoot: "/unused",
+      runner: fakeRunner(nullOrigin),
+      command: ownedPort,
+    });
+    expect((await nullDemo(release, gate)).find((action) => action.featureId === "section-1-im"))
       .toMatchObject({ status: "failed", observations: { management_shape_valid: false } });
   });
 
@@ -622,7 +608,42 @@ describe("createStartUpOSDemoActions", () => {
     const actions = await demo(release, gate);
     const action = actions.find((candidate) => candidate.featureId === "section-1-im")!;
     expect(action).toMatchObject({ status: "failed", reason: "stop_failed" });
+    expect(action.diagnostics?.startsWith("phase=stop\n")).toBe(true);
     expect(action.diagnostics?.length).toBeLessThanOrEqual(2048);
+  });
+
+  it("preserves the runner phase prefix when start diagnostics are truncated", async () => {
+    const origin = await fixture();
+    const runner = fakeRunner(origin, {
+      startError: new DesktopRunnerError("readiness", "x".repeat(3000), "not ready"),
+    });
+    const demo = createStartUpOSDemoActions({
+      startupOsRoot: "/unused",
+      runner,
+      command: ownedPort,
+    });
+
+    const error = await demo(release, gate).catch((reason: unknown) => reason as Error);
+    expect(error.message.startsWith("phase=readiness\n")).toBe(true);
+    expect(error.message.length).toBeLessThanOrEqual(2048);
+  });
+
+  it("preserves the runner phase when oversized start and stop diagnostics combine", async () => {
+    const origin = await fixture();
+    const runner = fakeRunner(origin, {
+      startError: new DesktopRunnerError("readiness", "s".repeat(3000), "not ready"),
+      stopError: new DesktopRunnerError("stop", "t".repeat(3000), "would not stop"),
+    });
+    const demo = createStartUpOSDemoActions({
+      startupOsRoot: "/unused",
+      runner,
+      command: ownedPort,
+    });
+
+    const error = await demo(release, gate).catch((reason: unknown) => reason as Error);
+    expect(error.message.startsWith("phase=readiness\n")).toBe(true);
+    expect(error.message).toContain("stop_failure=phase=stop");
+    expect(error.message.length).toBeLessThanOrEqual(2048);
   });
 
   it("does not start the runner when every decision is ineligible", async () => {

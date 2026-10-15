@@ -51,13 +51,15 @@ function senseCenterUrl(origin: string): string {
   return url.toString();
 }
 
-function boundedDiagnostics(value: unknown): string {
-  const text = value instanceof DesktopRunnerError
-    ? `phase=${value.phase}\n${value.diagnostics}`
-    : value instanceof Error
-      ? value.message
-      : String(value);
-  return text.length <= MAX_DIAGNOSTICS ? text : `…${text.slice(-(MAX_DIAGNOSTICS - 1))}`;
+function boundedDiagnostics(value: unknown, maxLength = MAX_DIAGNOSTICS): string {
+  if (value instanceof DesktopRunnerError) {
+    const prefix = `phase=${value.phase}\n`;
+    const text = `${prefix}${value.diagnostics}`;
+    if (text.length <= maxLength) return text;
+    return `${prefix}…${value.diagnostics.slice(-(maxLength - prefix.length - 1))}`;
+  }
+  const text = value instanceof Error ? value.message : String(value);
+  return text.length <= maxLength ? text : `…${text.slice(-(maxLength - 1))}`;
 }
 
 async function defaultCommand(
@@ -340,7 +342,6 @@ export function createStartUpOSDemoActions(options: DesktopActionsOptions): Desk
     createStartUpOSDesktopRunner({ startupOsRoot: options.startupOsRoot, rendererUrl });
   const command = options.command ?? defaultCommand;
   const recorder = options.recorder ?? (process.platform === "darwin" ? defaultCommand : undefined);
-  const timeoutMs = options.requestTimeoutMs ?? 30_000;
   const recordingDurationSeconds =
     options.recordingDurationSeconds ?? DEFAULT_RECORDING_DURATION_SECONDS;
   const recordingGraceMs = options.recordingGraceMs ?? DEFAULT_RECORDING_GRACE_MS;
@@ -354,6 +355,10 @@ export function createStartUpOSDemoActions(options: DesktopActionsOptions): Desk
   if (!Number.isSafeInteger(recordingTimeoutMs) || recordingTimeoutMs > MAX_TIMER_MS) {
     throw new Error(`recording timeout must be a safe integer no greater than ${MAX_TIMER_MS}ms`);
   }
+  const recordingActive = Boolean(options.runDirectory) && recorder !== undefined;
+  const timeoutMs =
+    options.requestTimeoutMs ??
+    (recordingActive ? Math.floor((recordingDurationSeconds * 1000) / 4) : 30_000);
 
   return async (release, gate) => {
     const records: DemoActionRecord[] = [];
@@ -467,7 +472,15 @@ export function createStartUpOSDemoActions(options: DesktopActionsOptions): Desk
     if (startFailed) {
       const diagnostics = boundedDiagnostics(startError);
       const combined = stopFailed
-        ? boundedDiagnostics(`${diagnostics}\nstop_failure=${boundedDiagnostics(stopError)}`)
+        ? startError instanceof DesktopRunnerError
+          ? boundedDiagnostics(
+              new DesktopRunnerError(
+                startError.phase,
+                `${startError.diagnostics}\nstop_failure=${boundedDiagnostics(stopError, Math.floor(MAX_DIAGNOSTICS / 2))}`,
+                startError.message,
+              ),
+            )
+          : boundedDiagnostics(`${diagnostics}\nstop_failure=${boundedDiagnostics(stopError)}`)
         : diagnostics;
       throw new Error(combined);
     }

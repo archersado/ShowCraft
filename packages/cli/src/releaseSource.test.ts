@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,11 +17,13 @@ import {
 } from "@showcraft/core";
 
 import { parseDemoArgs, runDemo } from "./main.js";
+import { buildDesktopReleaseFixture, cleanupDesktopFixtures } from "./desktopFixtures.js";
 
 const temporaryPaths: string[] = [];
 const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
+  await cleanupDesktopFixtures();
   await Promise.all(temporaryPaths.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
 
@@ -28,7 +31,100 @@ const STARTUPO_CHANGELOG =
   "/Users/archersado/workspace/startupOS/docs/changes/releases/v0.3.3/changelog.md";
 
 /** Skip StartUpOS-dependent assertions when the read-only fixture is absent. */
-const startuposAvailable = process.platform !== "win32";
+const startuposAvailable = process.platform !== "win32" && existsSync(STARTUPO_CHANGELOG);
+
+describe("runDemo with a self-contained desktop release fixture", () => {
+  it("parses fixture release sections with source provenance", async () => {
+    const fixture = await buildDesktopReleaseFixture();
+    const root = await mkdtemp(join(tmpdir(), "showcraft-src-fixture-"));
+    temporaryPaths.push(root);
+
+    const result = await runDemo({ outputRoot: root, runId: "fixture-source", source: fixture.changelogPath });
+    const release = JSON.parse(await readFile(join(result.runDirectory, "release.json"), "utf8"));
+
+    expect(release).toMatchObject({
+      version: "v0.1.1",
+      source: fixture.changelogPath,
+      features: [{
+        id: "section-1-im",
+        title: "感知与 IM 路由",
+        sourceRef: { sectionIndex: 1, sectionTitle: "感知与 IM 路由", startLine: 3, endLine: 6 },
+      }],
+    });
+    expect(release.sourceDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("produces schema-valid linkable evidence from the fixture commit", async () => {
+    const fixture = await buildDesktopReleaseFixture();
+    const root = await mkdtemp(join(tmpdir(), "showcraft-evidence-fixture-"));
+    temporaryPaths.push(root);
+
+    const result = await runDemo({ outputRoot: root, runId: "fixture-evidence", source: fixture.changelogPath });
+    const release = JSON.parse(await readFile(join(result.runDirectory, "release.json"), "utf8"));
+    const evidenceFile = JSON.parse(await readFile(join(result.runDirectory, "evidence.json"), "utf8"));
+    const { entryPoints, ...pack } = evidenceFile;
+
+    expect(evidencePackSchema.safeParse(pack).success).toBe(true);
+    expect(evidenceFile.entries).toHaveLength(1);
+    expect(evidenceFile.entries[0]).toMatchObject({ featureId: "section-1-im", confidence: 1 });
+    expect(evidenceFile.entries[0].reference.location).toMatch(/^[0-9a-f]{40}$/);
+    expect(entryPoints).toHaveLength(1);
+    expect(entryPointCandidateSchema.safeParse(entryPoints[0]).success).toBe(true);
+    expect(safeParseReleasePackage(releasePackageSchema, { release, evidence: pack, entryPoints }).success)
+      .toBe(true);
+  });
+
+  it("keeps fixture evidence byte-stable across two runs of the same repository", async () => {
+    const fixture = await buildDesktopReleaseFixture();
+    const firstRoot = await mkdtemp(join(tmpdir(), "showcraft-ev-fixture-a-"));
+    const secondRoot = await mkdtemp(join(tmpdir(), "showcraft-ev-fixture-b-"));
+    temporaryPaths.push(firstRoot, secondRoot);
+
+    const first = await runDemo({ outputRoot: firstRoot, runId: "fixture-evidence", source: fixture.changelogPath });
+    const second = await runDemo({ outputRoot: secondRoot, runId: "fixture-evidence", source: fixture.changelogPath });
+    expect((await readFile(join(first.runDirectory, "evidence.json")))
+      .equals(await readFile(join(second.runDirectory, "evidence.json")))).toBe(true);
+  });
+
+  it("gates the evidence-backed fixture and keeps the five-artifact source contract", async () => {
+    const fixture = await buildDesktopReleaseFixture();
+    const root = await mkdtemp(join(tmpdir(), "showcraft-gate-fixture-"));
+    temporaryPaths.push(root);
+
+    const result = await runDemo({ outputRoot: root, runId: "fixture-gate", source: fixture.changelogPath });
+    const run = JSON.parse(await readFile(join(result.runDirectory, "run.json"), "utf8"));
+    const gate = JSON.parse(await readFile(join(result.runDirectory, "gate.json"), "utf8"));
+
+    expect(run.artifacts).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "scene.json",
+      "manifest.json",
+    ]);
+    expect(gateResultSchema.safeParse(gate).success).toBe(true);
+    expect(gate.decisions).toContainEqual(expect.objectContaining({
+      featureId: "section-1-im",
+      reason: "eligible",
+      automatable: true,
+      confidence: 1,
+    }));
+  });
+
+  it("keeps fixture gate and scene bytes stable across repeated source runs", async () => {
+    const fixture = await buildDesktopReleaseFixture();
+    const firstRoot = await mkdtemp(join(tmpdir(), "showcraft-gate-fixture-a-"));
+    const secondRoot = await mkdtemp(join(tmpdir(), "showcraft-gate-fixture-b-"));
+    temporaryPaths.push(firstRoot, secondRoot);
+
+    const first = await runDemo({ outputRoot: firstRoot, runId: "fixture-gate", source: fixture.changelogPath });
+    const second = await runDemo({ outputRoot: secondRoot, runId: "fixture-gate", source: fixture.changelogPath });
+    for (const file of ["gate.json", "scene.json"]) {
+      expect((await readFile(join(first.runDirectory, file)))
+        .equals(await readFile(join(second.runDirectory, file))), file).toBe(true);
+    }
+  });
+});
 
 describe("runDemo with --source", () => {
   it("keeps mock behavior identical when no source is given", async () => {
@@ -48,11 +144,10 @@ describe("runDemo with --source", () => {
     );
   });
 
-  it(startuposAvailable ? "parses the StartUpOS v0.3.3 changelog into features" : "parses a local changelog into features", async () => {
+  it.runIf(startuposAvailable)("parses the StartUpOS v0.3.3 changelog into features", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-src-real-"));
     temporaryPaths.push(root);
-    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
-    if (!sourcePath) return;
+    const sourcePath = STARTUPO_CHANGELOG;
 
     const result = await runDemo({ outputRoot: root, runId: "v033-source", source: sourcePath });
 
@@ -94,11 +189,10 @@ describe("runDemo with --source", () => {
     });
   });
 
-  it(startuposAvailable ? "produces linkable v0.3.3 evidence with confidences" : "produces empty evidence outside a git repo", async () => {
+  it.runIf(startuposAvailable)("produces linkable v0.3.3 evidence with confidences", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-src-evidence-"));
     temporaryPaths.push(root);
-    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
-    if (!sourcePath) return;
+    const sourcePath = STARTUPO_CHANGELOG;
 
     const result = await runDemo({ outputRoot: root, runId: "v033-evidence", source: sourcePath });
 
@@ -150,12 +244,11 @@ describe("runDemo with --source", () => {
     }
   });
 
-  it(startuposAvailable ? "is byte-stable for repeated v0.3.3 evidence runs" : "skips byte-stability outside CI fixture", async () => {
+  it.runIf(startuposAvailable)("is byte-stable for repeated v0.3.3 evidence runs", async () => {
     const firstRoot = await mkdtemp(join(tmpdir(), "showcraft-ev-bytes-a-"));
     const secondRoot = await mkdtemp(join(tmpdir(), "showcraft-ev-bytes-b-"));
     temporaryPaths.push(firstRoot, secondRoot);
-    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
-    if (!sourcePath) return;
+    const sourcePath = STARTUPO_CHANGELOG;
 
     const first = await runDemo({ outputRoot: firstRoot, runId: "ev-bytes", source: sourcePath });
     const second = await runDemo({ outputRoot: secondRoot, runId: "ev-bytes", source: sourcePath });
@@ -164,11 +257,10 @@ describe("runDemo with --source", () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
   });
 
-  it(startuposAvailable ? "gates the v0.3.3 features: no_evidence downgraded, evidence-backed eligible" : "skips gate assertions outside CI fixture", async () => {
+  it.runIf(startuposAvailable)("gates the v0.3.3 features: no_evidence downgraded, evidence-backed eligible", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-gate-"));
     temporaryPaths.push(root);
-    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
-    if (!sourcePath) return;
+    const sourcePath = STARTUPO_CHANGELOG;
 
     const result = await runDemo({ outputRoot: root, runId: "v033-gate", source: sourcePath });
 
@@ -244,12 +336,11 @@ describe("runDemo with --source", () => {
     expect(parsedPackage.success).toBe(true);
   });
 
-  it(startuposAvailable ? "is byte-stable for repeated v0.3.3 gate runs" : "skips gate byte-stability outside CI fixture", async () => {
+  it.runIf(startuposAvailable)("is byte-stable for repeated v0.3.3 gate runs", async () => {
     const firstRoot = await mkdtemp(join(tmpdir(), "showcraft-gate-bytes-a-"));
     const secondRoot = await mkdtemp(join(tmpdir(), "showcraft-gate-bytes-b-"));
     temporaryPaths.push(firstRoot, secondRoot);
-    const sourcePath = startuposAvailable ? STARTUPO_CHANGELOG : undefined;
-    if (!sourcePath) return;
+    const sourcePath = STARTUPO_CHANGELOG;
 
     const first = await runDemo({ outputRoot: firstRoot, runId: "gate-bytes", source: sourcePath });
     const second = await runDemo({ outputRoot: secondRoot, runId: "gate-bytes", source: sourcePath });
@@ -260,7 +351,7 @@ describe("runDemo with --source", () => {
     }
   });
 
-  it(startuposAvailable ? "keeps evidence.json absent for mock runs" : "keeps evidence.json absent", async () => {
+  it("keeps evidence.json absent for mock runs", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-ev-mock-"));
     temporaryPaths.push(root);
     const result = await runDemo({ outputRoot: root, runId: "ev-mock" });
