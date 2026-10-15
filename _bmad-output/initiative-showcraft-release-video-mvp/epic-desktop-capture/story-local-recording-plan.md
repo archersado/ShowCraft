@@ -3,7 +3,7 @@ title: '本地录屏接入与媒体引用写入 run'
 type: 'feature'
 ticket: '7'
 created: '2026-10-14'
-status: ready-for-dev
+status: built
 route: 'full'
 route_source: 'auto'
 review: ''
