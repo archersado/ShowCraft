@@ -124,7 +124,10 @@ describe("createEdgeTtsNarration", () => {
     const artifact = await narration(release, scenePlan);
 
     expect(artifact.voice).toBe(DEFAULT_NARRATION_VOICE);
-    expect(artifact.scenes[0]).toMatchObject({
+    expect(artifact.scenes.map((scene) => scene.sceneId)).toEqual([
+      "scene-intro", "scene-mock-feature", "scene-outro",
+    ]);
+    expect(artifact.scenes[1]).toMatchObject({
       audioFile: "narration-scene-mock-feature.mp3",
       audioDurationMs: 500,
       cues: [
@@ -132,16 +135,16 @@ describe("createEdgeTtsNarration", () => {
         { text: "是", startMs: 300, endMs: 500 },
       ],
     });
-    await expect(readFile(join(runDirectory, artifact.scenes[0]!.audioFile))).resolves.toHaveLength(3_000);
+    await expect(readFile(join(runDirectory, artifact.scenes[1]!.audioFile))).resolves.toHaveLength(3_000);
   });
 
   it("uses no-dash uppercase request IDs and passes through a custom voice", async () => {
-    let socket: FakeSocket | undefined;
+    const sockets: FakeSocket[] = [];
     let url = "";
     const { runDirectory, release, scenePlan } = await fixture(
       factoryFor(successfulDriver, (receivedUrl, receivedSocket) => {
         url = receivedUrl;
-        socket = receivedSocket;
+        sockets.push(receivedSocket);
       }),
     );
     const narration = createEdgeTtsNarration({
@@ -149,15 +152,16 @@ describe("createEdgeTtsNarration", () => {
       voice: "en-US-EmmaMultilingualNeural",
       connect: factoryFor(successfulDriver, (receivedUrl, receivedSocket) => {
         url = receivedUrl;
-        socket = receivedSocket;
+        sockets.push(receivedSocket);
       }),
     });
-    scenePlan.scenes[0]!.narration = "A & <B>";
+    scenePlan.scenes[1]!.narration = "A & <B>";
     const artifact = await narration(release, scenePlan);
 
     expect(url).toMatch(/ConnectionId=[A-F0-9]{32}/);
-    expect(socket!.sent.find((frame) => frame.includes("Path:ssml"))).toMatch(/X-RequestId:[A-F0-9]{32}/);
-    const sent = socket!.sent.join("\n");
+    expect(sockets.flatMap((socket) => socket.sent).find((frame) => frame.includes("Path:ssml")))
+      .toMatch(/X-RequestId:[A-F0-9]{32}/);
+    const sent = sockets.flatMap((socket) => socket.sent).join("\n");
     expect(sent).toContain('"wordBoundaryEnabled":"true"');
     expect(sent).toContain('"outputFormat":"audio-24khz-48kbitrate-mono-mp3"');
     expect(sent).toContain("xml:lang='en-US'");
@@ -200,7 +204,7 @@ describe("createEdgeTtsNarration", () => {
       socket.open();
     }));
     await expect(narration(release, scenePlan)).rejects.toThrow("damaged audio");
-    expect(await readdir(runDirectory)).toContain("narration-scene-mock-feature.mp3.failed");
+    expect(await readdir(runDirectory)).toContain("narration-scene-intro.mp3.failed");
   });
 
   it("fails when audio has no WordBoundary metadata", async () => {
@@ -251,14 +255,20 @@ describe("createEdgeTtsNarration", () => {
     });
 
     const artifact = await narration(release, scenePlan);
-    expect(connections).toBe(2);
-    expect(artifact.scenes.map((scene) => scene.sceneId)).toEqual(["scene-one", "scene-two"]);
+    expect(connections).toBe(4);
+    expect(artifact.scenes.map((scene) => scene.sceneId)).toEqual([
+      "scene-intro", "scene-one", "scene-two", "scene-outro",
+    ]);
     expect(artifact.scenes.map((scene) => scene.audioFile)).toEqual([
+      "narration-scene-intro.mp3",
       "narration-scene-one.mp3",
       "narration-scene-two.mp3",
+      "narration-scene-outro.mp3",
     ]);
     await expect(readdir(runDirectory)).resolves.toEqual([
+      "narration-scene-intro.mp3",
       "narration-scene-one.mp3",
+      "narration-scene-outro.mp3",
       "narration-scene-two.mp3",
     ]);
   });

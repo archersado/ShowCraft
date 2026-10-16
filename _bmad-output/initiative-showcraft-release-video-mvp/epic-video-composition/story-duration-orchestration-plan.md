@@ -3,7 +3,7 @@ title: 'feature 数量驱动的镜头时长与 90 秒系列拆分'
 type: 'feature'
 ticket: '11'
 created: '2026-10-16'
-status: ready-for-dev
+status: built
 baseline_revision: 18f3d58835eaa32fca1588be725d3e0e6be2622a
 route: 'full'
 route_source: 'auto'
@@ -76,13 +76,13 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/core/src/durationOrchestration.ts` + `durationOrchestration.test.ts` -- 常量、intro/outro 构造、estimate、planVolumes 纯函数；完成条件：矩阵 1/2/3/5/6/7 纯函数层用例全绿、确定性断言通过；`pnpm typecheck` 通过。
-- [ ] `packages/core/src/domain.ts` + `index.ts` + `domain.test.ts` -- volumes schema、superRefine、保留字规则、聚合校验；完成条件：矩阵 12/13 用例全绿；既有 domain 用例零回归。
-- [ ] `packages/core/src/ports.ts` + `testing.ts` + `ports.test.ts` -- mock planner/renderer 时长编排升级（**契约修订提交点**）；完成条件：ports.test 更新后全绿；1/3/6 feature 的 scene/manifest 内容断言通过。
-- [ ] `packages/core/src/orchestrator.ts` + `orchestrator.test.ts` + `runStore.test.ts` + core e2e -- manifest 聚合校验与集成矩阵；完成条件：矩阵 1/5/8/10/11 集成层全绿；既有 278 用例中除契约修订断言外零回归。
-- [ ] `packages/cli/src/main.test.ts` + `releaseSource.test.ts` + cli e2e -- CLI 层修订后契约锁定与 `--tts` 扩展用例；完成条件：矩阵 4/9 用例全绿；mock 4 文件 / `--source` 5 文件集合断言继续通过（内容为修订后契约）。
-- [ ] 顺手项：`quarantineNarrationFile` 删除 + cli tsconfig exclude desktopFixtures；完成条件：`pnpm build` 后 dist 无 desktopFixtures.*，lint/typecheck/test 全绿。
-- [ ] 全量验证：见 Verification 段命令清单全部通过。
+- [x] `packages/core/src/durationOrchestration.ts` + `durationOrchestration.test.ts` -- 常量、intro/outro 构造、estimate、planVolumes 纯函数；完成条件：矩阵 1/2/3/5/6/7 纯函数层用例全绿、确定性断言通过；`pnpm typecheck` 通过。
+- [x] `packages/core/src/domain.ts` + `index.ts` + `domain.test.ts` -- volumes schema、superRefine、保留字规则、聚合校验；完成条件：矩阵 12/13 用例全绿；既有 domain 用例零回归。
+- [x] `packages/core/src/ports.ts` + `testing.ts` + `ports.test.ts` -- mock planner/renderer 时长编排升级（**契约修订提交点**）；完成条件：ports.test 更新后全绿；1/3/6 feature 的 scene/manifest 内容断言通过。
+- [x] `packages/core/src/orchestrator.ts` + `orchestrator.test.ts` + `runStore.test.ts` + core e2e -- manifest 聚合校验与集成矩阵；完成条件：矩阵 1/5/8/10/11 集成层全绿；既有 278 用例中除契约修订断言外零回归。
+- [x] `packages/cli/src/main.test.ts` + `releaseSource.test.ts` + cli e2e -- CLI 层修订后契约锁定与 `--tts` 扩展用例；完成条件：矩阵 4/9 用例全绿；mock 4 文件 / `--source` 5 文件集合断言继续通过（内容为修订后契约）。
+- [x] 顺手项：`quarantineNarrationFile` 删除 + cli tsconfig exclude desktopFixtures；完成条件：`pnpm build` 后 dist 无 desktopFixtures.*，lint/typecheck/test 全绿。
+- [x] 全量验证：见 Verification 段命令清单全部通过。
 
 **Acceptance Criteria:**
 - Given 1/3/6 个 feature 的 release（mock 与纯函数注入两种输入形态），when run mock pipeline，then scenePlan 含 intro + N feature + outro 镜头、manifest.volumes 在 40s/72s/120s 下分别为 1/1/2 卷、每卷 ≤90s、单镜头不跨卷、卷序与场景顺序一致（spec「多特性视频拆分」Scenario 语义）。
@@ -94,11 +94,39 @@ context:
 
 ## Implementation Notes
 
-（实施期待研发回填：实际镜头时长常量如有微调、契约修订后各文件字节样例、`--tts` 真实产物计数。）
+实际取值与批准计划一致：intro/outro 各 12s、feature 镜头 16s、单卷上限 90s。mock 1 feature 的 `scene.json` 为 intro/feature/outro 三镜头，`manifest.json` 为 40s 单卷；fake `--tts` 产出 3 个 MP3 并与三镜头一一对应。真实联网 Edge TTS 手动段未执行（非验收必需）。
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+| Lens | Finding | Verdict and evidence |
+|---|---|---|
+| blind-hunter | 分卷未按 feature group 原子化 | **false** — 冻结矩阵 7 明确允许同一 feature 的多个镜头跨卷，原子单位是镜头。 |
+| blind-hunter | `volumes` 可选会让自定义 renderer 绕过拆分 | **false** — 已批准方案明确把 `volumes` 定义为向后兼容的可选视图；默认 mock renderer 是本 story 唯一生产路径。 |
+| blind-hunter | 自定义 scene plan 可省略 intro/outro | **false** — 强制要求仅适用于带 `volumes` 的已编排合同；冻结方案未取消 legacy port 输出能力。 |
+| blind-hunter | 未强制每个 release feature 都有 scene | **false** — 本次默认 planner 对每个 feature 恰产出一镜头；对任意第三方 planner 增加全局覆盖约束不在批准合同中，且不是本改动造成的回归。 |
+| blind-hunter | 多镜头 feature 可累计超过 20 秒 | **false** — 冻结矩阵 7 明确把 12–20 秒窗口应用到 feature 镜头并允许同一 feature 多镜头跨卷。 |
+| blind-hunter | 保留 ID 被加入所有引用域 | **medium / patch** — `collectFeatureIds` 确实会让 evidence/gate/actions 接受不属于 release 的 `intro`/`outro`；保留 ID 应只放行 scene/narration/manifest。 |
+| blind-hunter | manifest schema 自身未校验卷总时长与 90 秒 | **low / rejected** — 现象真实，但批准设计把跨对象/聚合时长校验放在 `validateReleasePackageRelations`；在 schema 重复规则会增加双处维护，直接 RunStore 绕过聚合器不是日常产品路径。 |
+| blind-hunter | manifest format 仍为 v1 | **false** — 冻结决策 3 明确规定版本号不变，且契约修订已获用户批准。 |
+| blind-hunter | `JSON.stringify` 受对象键插入顺序影响 | **low / rejected** — 理论上成立，但正常路径使用 schema 形状与同源 scenes；仅手工构造的等价对象会触发，结构比较会增加本 story 非必要代码。 |
+| blind-hunter | 聚合校验先于字段 schema 校验 | **medium / patch** — 对缺失 `scenes` 等畸形 provider 输出会出现偶发 TypeError，破坏既有路径化诊断；应先字段解析再做关系校验。 |
+| blind-hunter | 普通 feature 可声明 `generated` 来源 | **medium / patch** — 新增 enum 值后无关系约束，普通镜头可绕过来源语义；intro/outro 应要求 generated，普通 feature 应拒绝 generated。 |
+| blind-hunter | scene ID 不唯一 | **medium / patch** — 重复 ID 可同时通过 scenes 与 volumes 投影，并令 `sceneById` 覆盖前值；需在 scene plan/manifest 合同拒绝。 |
+| blind-hunter | 纯函数接受非正或非有限镜头时长 | **medium / patch** — 导出的纯函数可被 schema 外直接调用，当前会产生无效累计或拆分；需显式抛 `DurationOrchestrationError`。 |
+| verification-gap | 管线边界未测试关系无效的 manifest | **medium / patch** — 删除 manifest 聚合校验仍不会让现有 pipeline 测试失败；需断言失败归因 manifest 且不持久化 manifest.json。 |
+| verification-gap | sequential volume index 无负向测试 | **low / patch** — 删除 index refine 不会令现有测试失败；表驱动非法 index 用例是直接测试补充。 |
+| verification-gap | exclude 不会删除已有 dist 死文件 | **low / patch** — `tsc -p` 不清理旧输出；验收要求 build 后无该文件，构建脚本应先清理明确的 cli dist。 |
+| edge-case-hunter | 非正/非有限时长 | **medium / patch** — 与 blind-hunter 同一真实缺口，需补 guard 与用例。 |
+| edge-case-hunter | manifest scenes 重复 ID | **medium / patch** — 与 blind-hunter 同一真实缺口，投影相同仍会通过当前 refine。 |
+| edge-case-hunter | feature 边界语义 | **false** — 冻结矩阵明确允许同 feature 多镜头跨卷。 |
+| edge-case-hunter | feature 聚合时长超窗 | **false** — 批准合同按镜头校验并显式覆盖多镜头 feature。 |
+| edge-case-hunter | 小数浮点误差使数学 90 秒拆卷 | **low / rejected** — 产品编排常量均为整数，批准输入矩阵不存在小数累计；引入 epsilon 会模糊严格 `>90` 合同。 |
+| edge-case-hunter | 增量构建残留 desktopFixtures | **low / patch** — 与 verification-gap 同一真实构建清理缺口。 |
+| intent-alignment | R8 应普遍约束所有自定义 ports | **false** — 已批准 Approach 明确落点是默认 mock planner/renderer，`volumes` 可选以保留旧合同。 |
+| intent-alignment | feature 应为不可拆的分卷单位 | **false** — 冻结矩阵 7 明确选择镜头原子性、允许单 feature 跨卷。 |
+| intent-alignment | 3/6 feature 未到真实 CLI 磁盘边界 | **false** — 批准 Code Map 明确以纯函数、ports 与 `runPipeline` 作为多 feature 装配层，CLI/source 测试锁定一 feature 文件合同。 |
 
 ## Design Notes
 

@@ -56,6 +56,16 @@ describe("CLI end-to-end: successful run on disk", () => {
     expect(parsed.scene.success).toBe(true);
     expect(parsed.manifest.success).toBe(true);
     expect(parsed.run.success).toBe(true);
+    if (parsed.scene.success && parsed.manifest.success) {
+      expect(parsed.scene.data.scenes.map((scene) => scene.featureId)).toEqual([
+        "intro", "mock-feature", "outro",
+      ]);
+      expect(parsed.manifest.data.volumes).toEqual([{
+        index: 1,
+        sceneIds: parsed.scene.data.scenes.map((scene) => scene.id),
+        plannedTotalSeconds: 40,
+      }]);
+    }
   });
 
   it("is byte-stable across identical runs", async () => {

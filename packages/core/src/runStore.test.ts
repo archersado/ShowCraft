@@ -8,14 +8,14 @@ import {
   stageFileNames,
 } from "./runStore.js";
 import {
-  sampleManifest,
   sampleRelease as release,
-  sampleScenePlan,
+  sampleOrchestratedScenePlan,
 } from "./testing.js";
 import type { EvidencePack } from "./domain.js";
+import { createMockRenderer } from "./ports.js";
 
-const scenePlan = sampleScenePlan(release);
-const manifest = sampleManifest(release, scenePlan);
+const scenePlan = sampleOrchestratedScenePlan(release);
+const manifest = createMockRenderer()(release, scenePlan);
 
 const evidencePack: EvidencePack = { releaseVersion: release.version, entries: [] };
 
@@ -87,6 +87,14 @@ describe("RunStoreCore", () => {
       "narration.json",
       "manifest.json",
     ]);
+    const persistedManifest = JSON.parse(
+      new TextDecoder().decode(files.find((file) => file.fileName === "manifest.json")?.bytes),
+    );
+    expect(persistedManifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: scenePlan.scenes.map((scene) => scene.id),
+      plannedTotalSeconds: 56,
+    }]);
   });
 
   it("stages evidence packs with entry points into a single evidence.json", () => {

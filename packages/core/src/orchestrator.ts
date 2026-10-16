@@ -1,10 +1,18 @@
 import {
+  DomainValidationError,
+  narrationArtifactSchema,
+  renderManifestSchema,
+  scenePlanSchema,
   validateReleasePackageRelations,
+  type DemoActions,
   type EvidencePack,
   type GateResult,
+  type NarrationArtifact,
   type ReleaseBrief,
   type RenderManifest,
+  type ScenePlan,
 } from "./domain.js";
+import { parseWithSchema } from "./serialization.js";
 import type { RunStage } from "./runStore.js";
 import { RunStoreCore } from "./runStore.js";
 import type {
@@ -53,6 +61,24 @@ export class StageFailure extends Error {
   }
 }
 
+function parseScenePlan(value: unknown): ScenePlan {
+  const result = parseWithSchema(scenePlanSchema, value);
+  if (!result.success) throw new DomainValidationError(result.issues);
+  return result.value;
+}
+
+function parseNarration(value: unknown): NarrationArtifact {
+  const result = parseWithSchema(narrationArtifactSchema, value);
+  if (!result.success) throw new DomainValidationError(result.issues);
+  return result.value;
+}
+
+function parseManifest(value: unknown): RenderManifest {
+  const result = parseWithSchema(renderManifestSchema, value);
+  if (!result.success) throw new DomainValidationError(result.issues);
+  return result.value;
+}
+
 /** Run the release pipeline to completion; returns the finished store. */
 export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Promise<RunStoreCore> {
   let progress: StageProgress = "release";
@@ -65,6 +91,8 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
     let gatedFeatureIds: ReadonlySet<string> | undefined;
     let evidencePack: EvidencePack | undefined;
     let gateResult: GateResult | undefined;
+    let desktopActions: DemoActions | undefined;
+    let narrationArtifact: NarrationArtifact | undefined;
     if (ports.codeEvidence) {
       progress = "evidence";
       const evidence = await ports.codeEvidence(release);
@@ -90,6 +118,7 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
         threshold: gateResult.threshold,
         actions,
       };
+      desktopActions = desktopArtifact;
       validateReleasePackageRelations({
         release,
         ...(evidencePack ? { evidence: evidencePack } : {}),
@@ -107,18 +136,29 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
     }
 
     progress = "scenePlan";
-    const scenePlan = await ports.scenePlanner(release, { gatedFeatureIds });
+    const scenePlan = parseScenePlan(await ports.scenePlanner(release, { gatedFeatureIds }));
+    validateReleasePackageRelations({ release, scenePlan });
     store.recordArtifact({ stage: "scenePlan", value: scenePlan });
 
     if (ports.narration) {
       progress = "narration";
-      const narration = await ports.narration(release, scenePlan);
+      const narration = parseNarration(await ports.narration(release, scenePlan));
       validateReleasePackageRelations({ release, scenePlan, narration });
       store.recordArtifact({ stage: "narration", value: narration });
+      narrationArtifact = narration;
     }
 
     progress = "manifest";
-    const manifest: RenderManifest = await ports.renderer(release, scenePlan);
+    const manifest = parseManifest(await ports.renderer(release, scenePlan));
+    validateReleasePackageRelations({
+      release,
+      ...(evidencePack ? { evidence: evidencePack } : {}),
+      ...(gateResult ? { gate: gateResult } : {}),
+      ...(desktopActions ? { actions: desktopActions } : {}),
+      scenePlan,
+      ...(narrationArtifact ? { narration: narrationArtifact } : {}),
+      manifest,
+    });
     store.recordArtifact({ stage: "manifest", value: manifest });
 
     progress = "completed";

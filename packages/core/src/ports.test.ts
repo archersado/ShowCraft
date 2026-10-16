@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMockScenePlanner, DesktopRunnerError } from "./ports.js";
+import { createMockRenderer, createMockScenePlanner, DesktopRunnerError } from "./ports.js";
 import type { DesktopRunnerPort } from "./ports.js";
 import { mockPorts } from "./testing.js";
 import { runPipeline } from "./orchestrator.js";
@@ -28,13 +28,17 @@ describe("createMockScenePlanner with gate context", () => {
     const plan: ScenePlan = planner(twoFeatureRelease, {
       gatedFeatureIds: new Set(["f-b"]),
     });
-    expect(plan.scenes.map((scene) => scene.narrationSource)).toEqual(["narration", "fallback"]);
+    expect(plan.scenes.map((scene) => scene.narrationSource)).toEqual([
+      "generated", "narration", "fallback", "generated",
+    ]);
+    expect(plan.scenes.map((scene) => scene.plannedDurationSeconds)).toEqual([12, 16, 16, 12]);
   });
 
   it("keeps every scene on narration when the gated set is empty", () => {
     const planner = createMockScenePlanner();
     const plan = planner(twoFeatureRelease, { gatedFeatureIds: new Set() });
-    expect(plan.scenes.every((scene) => scene.narrationSource === "narration")).toBe(true);
+    expect(plan.scenes.filter((scene) => !["intro", "outro"].includes(scene.featureId))
+      .every((scene) => scene.narrationSource === "narration")).toBe(true);
   });
 
   it("keeps 2.3 behavior byte-for-byte when no gate context is provided", () => {
@@ -42,7 +46,8 @@ describe("createMockScenePlanner with gate context", () => {
     const withoutContext = planner(twoFeatureRelease);
     const withEmptyContext = planner(twoFeatureRelease, {});
     for (const plan of [withoutContext, withEmptyContext]) {
-      expect(plan.scenes.every((scene) => scene.narrationSource === "narration")).toBe(true);
+      expect(plan.scenes.filter((scene) => !["intro", "outro"].includes(scene.featureId))
+        .every((scene) => scene.narrationSource === "narration")).toBe(true);
     }
     expect(JSON.stringify(withoutContext)).toBe(JSON.stringify(withEmptyContext));
   });
@@ -71,8 +76,29 @@ describe("createMockScenePlanner with gate context", () => {
       .collectFiles()
       .find((file) => file.fileName === "scene.json")?.bytes;
     const plan = JSON.parse(new TextDecoder().decode(sceneBytes));
-    expect(plan.scenes).toHaveLength(1);
-    expect(plan.scenes[0]?.narrationSource).toBe("fallback");
+    expect(plan.scenes).toHaveLength(3);
+    expect(plan.scenes[1]?.narrationSource).toBe("fallback");
+  });
+
+  it("renders one ordered volume for three features and two for six", () => {
+    const planner = createMockScenePlanner();
+    const renderer = createMockRenderer();
+    for (const [count, expectedTotals] of [[3, [72]], [6, [76, 44]]] as const) {
+      const release = {
+        ...twoFeatureRelease,
+        features: Array.from({ length: count }, (_, index) => ({
+          id: `f-${index}`,
+          title: `功能 ${index}`,
+          narration: `旁白 ${index}`,
+        })),
+      };
+      const plan = planner(release);
+      const manifest = renderer(release, plan);
+      expect(manifest.volumes?.map((volume) => volume.plannedTotalSeconds)).toEqual(expectedTotals);
+      expect(manifest.volumes?.flatMap((volume) => volume.sceneIds)).toEqual(
+        plan.scenes.map((scene) => scene.id),
+      );
+    }
   });
 });
 

@@ -24,6 +24,7 @@ export {
   releasePackageSchema,
   renderFormatSchema,
   renderManifestSchema,
+  volumeSchema,
   reviewDecisionSchema,
   reviewStatusSchema,
   runFormatSchema,
@@ -54,6 +55,7 @@ export type {
   ReleaseFeature,
   ReleasePackage,
   RenderManifest,
+  Volume,
   ReviewDecision,
   ReviewStatus,
   RunRecord,
@@ -112,6 +114,25 @@ export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
 
 export { applyConfidenceGate, gateThreshold } from "./confidenceGate.js";
+
+export {
+  FEATURE_DURATION_SECONDS,
+  FEATURE_MAX_SECONDS,
+  FEATURE_MIN_SECONDS,
+  INTRO_FEATURE_ID,
+  INTRO_OUTRO_DURATION_SECONDS,
+  INTRO_OUTRO_MAX_SECONDS,
+  INTRO_OUTRO_MIN_SECONDS,
+  OUTRO_FEATURE_ID,
+  VOLUME_LIMIT_SECONDS,
+  DurationOrchestrationError,
+  buildIntroOutroScenes,
+  estimateTotalSeconds,
+  planVolumes,
+  plannedFeatureDurationSeconds,
+} from "./durationOrchestration.js";
+
+export type { PlannedVolume } from "./durationOrchestration.js";
 
 export {
   collectTokens,
