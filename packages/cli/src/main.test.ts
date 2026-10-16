@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { NarrationError } from "@showcraft/core";
 
 import { parseDemoArgs, runDemo } from "./main.js";
 
@@ -69,6 +70,67 @@ describe("runDemo", () => {
 
     await expect(runDemo({ outputRoot: root, runId: "../escape" })).rejects.toThrow(/Invalid run ID/);
   });
+
+  it("assembles an opt-in narration port without changing the default path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-tts-"));
+    temporaryPaths.push(root);
+    const result = await runDemo({
+      outputRoot: root,
+      runId: "tts-run",
+      tts: true,
+      voice: "en-US-EmmaMultilingualNeural",
+      createNarration: (runDirectory, voice) => async (release, scenePlan) => {
+        await writeFile(join(runDirectory, "narration-scene-mock-feature.mp3"), new Uint8Array([0xff, 0xf3]));
+        return {
+          releaseVersion: release.version,
+          voice: voice!,
+          scenes: scenePlan.scenes.map((scene) => ({
+            sceneId: scene.id,
+            featureId: scene.featureId,
+            audioFile: `narration-${scene.id}.mp3`,
+            audioDurationMs: 1,
+            voice: voice!,
+            cues: [{ text: scene.narration, startMs: 0, endMs: 1 }],
+          })),
+        };
+      },
+    });
+
+    expect(await readdir(result.runDirectory)).toEqual([
+      "manifest.json",
+      "narration-scene-mock-feature.mp3",
+      "narration.json",
+      "release.json",
+      "run.json",
+      "scene.json",
+    ]);
+  });
+
+  it("rejects a programmatic voice override when TTS is disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-voice-"));
+    temporaryPaths.push(root);
+    await expect(runDemo({ outputRoot: root, runId: "bad-voice", voice: "custom" })).rejects.toThrow(
+      /--voice requires --tts/,
+    );
+  });
+
+  it("persists a bounded phase-bearing narration failure reason", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-tts-failure-"));
+    temporaryPaths.push(root);
+    await expect(runDemo({
+      outputRoot: root,
+      runId: "tts-failure",
+      tts: true,
+      createNarration: () => () => {
+        throw new NarrationError("handshake", "service rejected", "service rejected");
+      },
+    })).rejects.toThrow(/handshake/);
+
+    const run = JSON.parse(await readFile(join(root, "tts-failure", "run.json"), "utf8"));
+    expect(run.failure).toMatchObject({ stage: "narration" });
+    expect(run.failure.reason).toContain("[handshake]");
+    expect(run.failure.reason.length).toBeLessThanOrEqual(2_048);
+  });
 });
 
 describe("parseDemoArgs", () => {
@@ -87,6 +149,18 @@ describe("parseDemoArgs", () => {
       desktopRoot: "/startupos",
     });
     expect(() => parseDemoArgs(["--desktop", "/startupos"])).toThrow(/requires --source/);
+  });
+
+  it("accepts --tts with an optional voice and rejects a voice alone", () => {
+    expect(parseDemoArgs(["--tts"])).toEqual({ tts: true });
+    expect(parseDemoArgs(["--tts", "--voice", "en-US-EmmaMultilingualNeural"])).toEqual({
+      tts: true,
+      voice: "en-US-EmmaMultilingualNeural",
+    });
+    expect(() => parseDemoArgs(["--voice", "en-US-EmmaMultilingualNeural"])).toThrow(
+      /--voice requires --tts/,
+    );
+    expect(() => parseDemoArgs(["--tts", "--voice", "--source", "release.md"])).toThrow(/Usage:/);
   });
 
   it("rejects programmatic desktop runs without a source before creating output", async () => {

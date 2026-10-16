@@ -467,4 +467,64 @@ describe("runPipeline", () => {
       "run.json",
     ]);
   });
+
+  it("records narration after the scene plan and before the manifest", async () => {
+    const ports = mockPorts();
+    ports.narration = (release, scenePlan) => ({
+      releaseVersion: release.version,
+      voice: "zh-CN-XiaoxiaoNeural",
+      scenes: scenePlan.scenes.map((scene) => ({
+        sceneId: scene.id,
+        featureId: scene.featureId,
+        audioFile: `narration-${scene.id}.mp3`,
+        audioDurationMs: 1_000,
+        voice: "zh-CN-XiaoxiaoNeural",
+        cues: [{ text: scene.narration, startMs: 0, endMs: 900 }],
+      })),
+    });
+    const store = new RunStoreCore("orch-narration");
+    await runPipeline(ports, store);
+
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "narration.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("attributes narration failures while preserving prior artifacts", async () => {
+    const ports = mockPorts();
+    ports.narration = () => {
+      throw new Error("tts unavailable");
+    };
+    const store = new RunStoreCore("orch-narration-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure).toMatchObject({ stage: "narration", reason: "tts unavailable" });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "run.json",
+    ]);
+  });
+
+  it("rejects narration that does not cover the planned scenes", async () => {
+    const ports = mockPorts();
+    ports.narration = (release) => ({
+      releaseVersion: release.version,
+      voice: "zh-CN-XiaoxiaoNeural",
+      scenes: [],
+    });
+    const store = new RunStoreCore("orch-narration-incomplete");
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure?.stage).toBe("narration");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "run.json",
+    ]);
+  });
 });

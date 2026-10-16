@@ -4,6 +4,7 @@ import {
   entryPointCandidateSchema,
   evidencePackSchema,
   gateResultSchema,
+  narrationArtifactSchema,
   releaseBriefSchema,
   renderManifestSchema,
   runRecordSchema,
@@ -12,6 +13,7 @@ import {
   type DemoActions,
   type EvidencePack,
   type GateResult,
+  type NarrationArtifact,
   type ReleaseBrief,
   type RenderManifest,
   type RunRecord,
@@ -29,7 +31,7 @@ import { parseWithSchema, stableJsonBytes } from "./serialization.js";
 
 /** Stages whose artifacts the release pipeline persists. Evidence and gate run
  * only when the corresponding ports are provided; the mock pipeline skips both. */
-export type RunStage = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "manifest";
+export type RunStage = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "narration" | "manifest";
 
 export const runStageOrder: readonly RunStage[] = [
   "release",
@@ -37,6 +39,7 @@ export const runStageOrder: readonly RunStage[] = [
   "gate",
   "desktop",
   "scenePlan",
+  "narration",
   "manifest",
 ];
 
@@ -46,6 +49,7 @@ export const stageFileNames: Record<RunStage, string> = {
   gate: "gate.json",
   desktop: "actions.json",
   scenePlan: "scene.json",
+  narration: "narration.json",
   manifest: "manifest.json",
 };
 
@@ -91,6 +95,7 @@ export type StageArtifact =
   | { stage: "gate"; value: GateResult }
   | { stage: "desktop"; value: DemoActions }
   | { stage: "scenePlan"; value: ScenePlan }
+  | { stage: "narration"; value: NarrationArtifact }
   | { stage: "manifest"; value: RenderManifest };
 
 export class RunStoreCore {
@@ -171,6 +176,11 @@ export class RunStoreCore {
       if (!result.success) {
         throw new DomainValidationError(result.issues);
       }
+    } else if (artifact.stage === "narration") {
+      const result = parseWithSchema(narrationChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
     } else {
       const result = parseWithSchema(manifestChecker, artifact.value);
       if (!result.success) {
@@ -229,4 +239,5 @@ const entryPointChecker = entryPointCandidateSchema;
 const gateChecker = gateResultSchema;
 const demoActionsChecker = demoActionsSchema;
 const scenePlanChecker = scenePlanSchema;
+const narrationChecker = narrationArtifactSchema;
 const manifestChecker = renderManifestSchema;
