@@ -3,7 +3,7 @@ title: 'feature 数量驱动的镜头时长与 90 秒系列拆分'
 type: 'feature'
 ticket: '11'
 created: '2026-10-16'
-status: draft
+status: ready-for-dev
 baseline_revision: 18f3d58835eaa32fca1588be725d3e0e6be2622a
 route: 'full'
 route_source: 'auto'
