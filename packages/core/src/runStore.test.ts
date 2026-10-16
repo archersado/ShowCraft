@@ -32,7 +32,7 @@ describe("RunStoreCore", () => {
         evidenceIds: [],
       })),
     };
-    for (const stage of ["release", "evidence", "gate", "desktop", "scenePlan", "manifest"] as const) {
+    for (const stage of ["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest"] as const) {
       const artifact =
         stage === "release"
           ? release
@@ -44,7 +44,20 @@ describe("RunStoreCore", () => {
                 ? { releaseVersion: release.version, threshold: 0.8, actions: [] }
               : stage === "scenePlan"
                 ? scenePlan
-                : manifest;
+                : stage === "narration"
+                  ? {
+                    releaseVersion: release.version,
+                    voice: "zh-CN-XiaoxiaoNeural",
+                    scenes: scenePlan.scenes.map((scene) => ({
+                      sceneId: scene.id,
+                      featureId: scene.featureId,
+                      audioFile: `narration-${scene.id}.mp3`,
+                      audioDurationMs: 1_000,
+                      voice: "zh-CN-XiaoxiaoNeural",
+                      cues: [{ text: scene.narration, startMs: 0, endMs: 900 }],
+                    })),
+                  }
+                  : manifest;
       store.recordArtifact({ stage, value: artifact });
     }
     store.complete();
@@ -57,6 +70,7 @@ describe("RunStoreCore", () => {
       "gate.json",
       "actions.json",
       "scene.json",
+      "narration.json",
       "manifest.json",
       "run.json",
     ]);
@@ -70,6 +84,7 @@ describe("RunStoreCore", () => {
       "gate.json",
       "actions.json",
       "scene.json",
+      "narration.json",
       "manifest.json",
     ]);
   });
@@ -216,10 +231,11 @@ describe("RunStoreCore", () => {
   });
 
   it("exposes stable stage ordering and file names", () => {
-    expect(runStageOrder).toEqual(["release", "evidence", "gate", "desktop", "scenePlan", "manifest"]);
+    expect(runStageOrder).toEqual(["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest"]);
     expect(stageFileNames.release).toBe("release.json");
     expect(stageFileNames.evidence).toBe("evidence.json");
     expect(stageFileNames.gate).toBe("gate.json");
     expect(stageFileNames.desktop).toBe("actions.json");
+    expect(stageFileNames.narration).toBe("narration.json");
   });
 });

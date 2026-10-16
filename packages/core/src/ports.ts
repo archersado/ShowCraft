@@ -3,6 +3,7 @@ import type {
   EntryPointCandidate,
   EvidencePack,
   GateResult,
+  NarrationArtifact,
   ReleaseBrief,
   RenderManifest,
   ScenePlan,
@@ -43,6 +44,24 @@ export type RendererPort = (
   release: ReleaseBrief,
   scenePlan: ScenePlan,
 ) => Promise<RenderManifest> | RenderManifest;
+
+export type NarrationPort = (
+  release: ReleaseBrief,
+  scenePlan: ScenePlan,
+) => Promise<NarrationArtifact> | NarrationArtifact;
+
+export type NarrationErrorPhase = "handshake" | "synthesize";
+
+export class NarrationError extends Error {
+  constructor(
+    readonly phase: NarrationErrorPhase,
+    readonly diagnostics: string,
+    message: string,
+  ) {
+    super(`[${phase}] ${message}`);
+    this.name = "NarrationError";
+  }
+}
 
 /**
  * Lifecycle outcome of a successful desktop `start()`: the app is ready to be

@@ -7,6 +7,7 @@ import {
   entryPointCandidateSchema,
   evidencePackSchema,
   gateResultSchema,
+  narrationArtifactSchema,
   releaseBriefSchema,
   renderManifestSchema,
   reviewDecisionSchema,
@@ -132,6 +133,83 @@ describe("releaseBriefSchema", () => {
         result.error.issues.some((issue) => issue.path.join(".") === "features.0.sourceRef.startLine"),
       ).toBe(true);
     }
+  });
+});
+
+describe("narrationArtifactSchema", () => {
+  const artifact = {
+    releaseVersion: "v1",
+    voice: "zh-CN-XiaoxiaoNeural",
+    scenes: [{
+      sceneId: "scene-one",
+      featureId: "feature-one",
+      audioFile: "narration-scene-one.mp3",
+      audioDurationMs: 1_000,
+      voice: "zh-CN-XiaoxiaoNeural",
+      cues: [{ text: "中文", startMs: 100, endMs: 300 }],
+    }],
+  };
+
+  it("accepts valid word-level timing", () => {
+    expect(narrationArtifactSchema.safeParse(artifact).success).toBe(true);
+  });
+
+  it("rejects non-positive cue spans", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.cues[0]!.endMs = 100;
+    expect(narrationArtifactSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects cues whose starts move backwards", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.cues.push({ text: "倒序", startMs: 50, endMs: 80 });
+    expect(narrationArtifactSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects path-like audio file references", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.audioFile = "../audio.mp3";
+    expect(narrationArtifactSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects timing beyond the audio duration, duplicate files, and conflicting voices", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.cues[0]!.endMs = 2_000;
+    invalid.scenes.push({
+      ...structuredClone(invalid.scenes[0]!),
+      sceneId: "scene-two",
+      voice: "en-US-EmmaMultilingualNeural",
+    });
+    const result = narrationArtifactSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(
+        expect.arrayContaining(["scenes.0.cues", "scenes.1.audioFile", "scenes.1.voice"]),
+      );
+    }
+  });
+
+  it("validates narration against release and scene-plan relations", () => {
+    const scenePlan = {
+      releaseVersion: release.version,
+      scenes: [sampleScene(release.features[0]!.id, "scene-one")],
+    };
+    const narration = {
+      ...artifact,
+      releaseVersion: release.version,
+      scenes: [{ ...artifact.scenes[0]!, featureId: release.features[0]!.id }],
+    };
+    expect(() => validateReleasePackageRelations({ release, scenePlan, narration })).not.toThrow();
+    expect(() => validateReleasePackageRelations({
+      release,
+      scenePlan,
+      narration: { ...narration, releaseVersion: "wrong" },
+    })).toThrow(/narration.releaseVersion/);
+    expect(() => validateReleasePackageRelations({
+      release,
+      scenePlan,
+      narration: { ...narration, scenes: [] },
+    })).toThrow(/exactly one/);
   });
 });
 

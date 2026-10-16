@@ -16,6 +16,9 @@ export {
   gateReasonSchema,
   gateResultSchema,
   narrationSourceSchema,
+  narrationArtifactSchema,
+  narratedSceneSchema,
+  subtitleCueSchema,
   releaseFeatureSchema,
   releaseBriefSchema,
   releasePackageSchema,
@@ -45,6 +48,8 @@ export type {
   GateDecision,
   GateReason,
   GateResult,
+  NarratedScene,
+  NarrationArtifact,
   ReleaseBrief,
   ReleaseFeature,
   ReleasePackage,
@@ -55,6 +60,7 @@ export type {
   RunStatus,
   Scene,
   ScenePlan,
+  SubtitleCue,
 } from "./domain.js";
 
 export {
@@ -89,6 +95,7 @@ export type {
   DesktopDemoPort,
   DesktopRunnerPort,
   DesktopStartInfo,
+  NarrationPort,
   EvidenceResult,
   ReleaseSourcePort,
   RendererPort,
@@ -98,6 +105,8 @@ export type {
 
 export { DesktopRunnerError } from "./ports.js";
 export type { DesktopRunnerErrorPhase } from "./ports.js";
+export { NarrationError } from "./ports.js";
+export type { NarrationErrorPhase } from "./ports.js";
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";

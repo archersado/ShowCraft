@@ -3,12 +3,13 @@ title: 'Edge TTS zh-CN-XiaoxiaoNeural adapter 与中文时序输出'
 type: 'feature'
 ticket: '9'
 created: '2026-10-15'
-status: ready-for-dev
+status: built
 baseline_revision: a99c2d5c7df0026f358d8a3ad3df2e4e060c9db5
 route: 'full'
 route_source: 'auto'
 review: 'thorough'
 review_source: 'auto'
+lenses_ran: ['blind-hunter', 'edge-case-hunter', 'verification-gap', 'intent-alignment']
 context:
   - 'openspec/changes/showcraft-release-video-mvp/specs/localized-video-composition/spec.md'
   - 'openspec/changes/showcraft-release-video-mvp/design.md'
@@ -77,13 +78,13 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/core/src/domain.ts` + `index.ts` -- narration 三 schema 与 refine；完成条件：`pnpm typecheck` 通过；domain.test 新增 refine 用例全绿（矩阵 14）。
-- [ ] `packages/core/src/ports.ts` -- `NarrationPort`/`NarrationError`；完成条件：typecheck 通过，orchestrator.test 集成用例可编译引用。
-- [ ] `packages/core/src/orchestrator.ts` + `runStore.ts` -- narration stage 与产物通道；完成条件：新增 stage 顺序/失败归因/产物命名用例全绿；既有 252 用例零回归（矩阵 2/3/13）。
-- [ ] `packages/cli/src/edgeTtsDrm.ts` + `edgeTtsDrm.test.ts` -- DRM v2 移植；完成条件：固定时间戳向量断言逐字符通过（矩阵 12，向量已在规划期锚定于 Design Notes 实测 3）。
-- [ ] `packages/cli/src/edgeTtsNarration.ts` + `edgeTtsNarration.test.ts` -- WSS 协议 adapter；完成条件：矩阵 1/5–11 协议层用例全绿（fake WS，无网络）；`X-RequestId` 格式常量锁定。
-- [ ] `packages/cli/src/main.ts` + `main.test.ts` -- `--tts`/`--voice` 装配；完成条件：flag 契约用例全绿；`--tts` run（fake 注入）产出 5 JSON + narration.json + mp3 集合断言（矩阵 4）；既有 e2e 字节契约零回归。
-- [ ] 真实网络冒烟（实施期一次性，手动段执行）：`pnpm demo -- --source <fixture或真实changelog> --tts --output runs` → afinfo 校验 mp3 + node 断言 narration.json cues；失败则按矩阵 5–10 诊断归因，不得伪造成功产物。
+- [x] `packages/core/src/domain.ts` + `index.ts` -- narration 三 schema 与 refine；完成条件：`pnpm typecheck` 通过；domain.test 新增 refine 用例全绿（矩阵 14）。
+- [x] `packages/core/src/ports.ts` -- `NarrationPort`/`NarrationError`；完成条件：typecheck 通过，orchestrator.test 集成用例可编译引用。
+- [x] `packages/core/src/orchestrator.ts` + `runStore.ts` -- narration stage 与产物通道；完成条件：新增 stage 顺序/失败归因/产物命名用例全绿；既有 252 用例零回归（矩阵 2/3/13）。
+- [x] `packages/cli/src/edgeTtsDrm.ts` + `edgeTtsDrm.test.ts` -- DRM v2 移植；完成条件：固定时间戳向量断言逐字符通过（矩阵 12，向量已在规划期锚定于 Design Notes 实测 3）。
+- [x] `packages/cli/src/edgeTtsNarration.ts` + `edgeTtsNarration.test.ts` -- WSS 协议 adapter；完成条件：矩阵 1/5–11 协议层用例全绿（fake WS，无网络）；`X-RequestId` 格式常量锁定。
+- [x] `packages/cli/src/main.ts` + `main.test.ts` -- `--tts`/`--voice` 装配；完成条件：flag 契约用例全绿；`--tts` run（fake 注入）产出 5 JSON + narration.json + mp3 集合断言（矩阵 4）；既有 e2e 字节契约零回归。
+- [x] 真实网络冒烟（实施期一次性，手动段执行）：`pnpm demo -- --source <fixture或真实changelog> --tts --output runs` → afinfo 校验 mp3 + node 断言 narration.json cues；失败则按矩阵 5–10 诊断归因，不得伪造成功产物。
 
 **Acceptance Criteria:**
 - Given 不带 `--tts` 的任意既有调用形态，when `pnpm test` 与真实 run，then 产物集合与字节同基线 `a99c2d5` 逐字节相同（mock 4 文件 / `--source` 5 文件），narration stage 未进入。
@@ -95,9 +96,44 @@ context:
 
 ## Implementation Notes
 
+- 实施采用 Node 24 原生 `WebSocketInit.headers` 完成 Edge 所需 Origin/UA/Cookie 握手；真实 `--source README.md --tts` 生成 3 个可由 `afinfo` 读取的 MP3（24kHz/48kbps/mono）与 8/3/25 条 cues。
+- review 后加强 narration 聚合关系（release/scenePlan 一一对应、voice/文件唯一、cue 时长上界）、phase-bearing bounded failure、MP3 帧头、voice locale，并补生产握手、请求帧、多场景和持久化失败测试。
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+- blind-1 — **medium / patch**：`releasePackageSchema` 缺 narration；已加入 optional narration 与聚合校验。
+- blind-2 — **medium / patch**：narration releaseVersion 未与 release 对齐；已在关系校验及 orchestrator 落盘前验证。
+- blind-3 — **high / patch**：空 scenes 可伪成功；schema 要求非空且与 scenePlan 精确一一对应。
+- blind-4 — **medium / patch**：重复 sceneId/audioFile 可覆盖；schema 已拒绝重复（文件名大小写不敏感）。
+- blind-5 — **low / patch**：scene voice 可与顶层冲突；schema 已要求一致。
+- blind-6 — **medium / patch**：cue 可越过音频；schema 已执行 `max(endMs) <= audioDurationMs * 1.05`。
+- blind-7 — **high / patch**：两字节 sync prefix 会接受损坏音频；已验证最小帧头、version/layer/bitrate/sample-rate 保留值。
+- blind-8 — **false**：`bytes / 6` 是批准计划固定 48kbps CBR 的明确算法，真实 afinfo 三段逐项一致；不引入 4.2 的媒体解析。
+- blind-9 — **false**：metadata XML entity 解码与锁定的 upstream edge-tts 7.3.1 行为一致，并新增 entity 测试。
+- blind-10 — **medium / patch**：custom voice 仍用 zh-CN lang；现从 voice 前缀推导 `xml:lang`，en-US 已测试且真实冒烟成功。
+- blind-11 — **false**：失败时保留已完成媒体是 frozen 约束；失败 run 不落 `narration.json`，因此无成功引用。
+- blind-12 — **low / rejected**：普通 Node 需 `NODE_USE_ENV_PROXY=1` 才保证读取 `https_proxy`；真实 opt-in 代理路径已通过，自动代理需新增 dispatcher 依赖且非主路径，不扩大实现。
+- edge-1 — **medium / patch**：重复 filename 覆盖；与 blind-4 同根修复并新增 schema 断言。
+- edge-2 — **high / patch**：port 可遗漏/错配计划场景；已在 orchestrator 进入 RunStore 前做聚合关系校验。
+- edge-3 — **low / rejected**：可信 Edge 服务在 60s timeout 内理论上可突发大量分片；日常不可达，新增内存策略超出已批准最小协议面。
+- edge-4 — **high / patch**：MP3 头过宽；与 blind-7 同根修复。
+- edge-5 — **medium / patch**：`--voice --source` 会把 flag 当音色；参数值现拒绝 `--` 前缀并有回归测试。
+- edge-6 — **low / patch**：DRM 导出函数接受 NaN/负数；增加 finite non-negative guard 与测试。
+- edge-7 — **medium / patch**：cue 越界；与 blind-6 同根修复。
+- edge-8 — **medium / patch**：持久化失败丢失 phase；`NarrationError.message` 现带 `[handshake|synthesize]`，run.json 测试锁定。
+- edge-9 — **medium / patch**：媒体写失败逃逸为普通 Error；正常写与 quarantine 写均包装为 synthesize NarrationError。
+- verification-1 — **medium / patch**：diagnostics 属性有界但持久化 message 可能超界；整个 phase-bearing message 已限制 2048，并测试 run.json。
+- verification-2 — **medium / patch**：production WebSocket headers 无确定性测试；抽取可注入 native constructor helper，锁定全部 query/header 合同。
+- verification-3 — **medium / patch**：fake 成功未校验 config/SSML；新增 word boundary、output format、prosody、locale 与 XML escape 断言。
+- verification-4 — **medium / patch**：仅单场景 adapter 测试；新增双场景、双连接、顺序及独立文件断言。
+- intent-1 — **false**：manifest 未消费 narration 是 frozen Intent 明确留给 4.3 的边界，当前 side artifact 正是本 story 目标。
+- intent-2 — **false**：diff 不携带联网证据属测试隔离设计；本次真实 WSS 多场景、en-US、代理冒烟均已完成。
+- intent-3 — **medium / patch**：adapter failure 与持久化分层验证不足；新增 phase-bearing narration failure 到 run.json 的 CLI 测试。
+- intent-4 — **false**：自动化用 fake 保持无网络，全链路 source CLI 已在真实 `README.md --tts` 冒烟验证。
+- intent-5 — **false**：CBR 字节换算是 frozen Design Notes 定案，afinfo 对三段结果逐值吻合。
+- intent-6 — **false**：既有 e2e/releaseSource 字节契约测试在全量回归继续通过，直接跨 revision 比较不是产品运行合同。
 
 ## Design Notes
 

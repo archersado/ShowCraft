@@ -11,6 +11,7 @@ import type {
   CodeEvidencePort,
   ConfidenceGatePort,
   DesktopDemoPort,
+  NarrationPort,
   RendererPort,
   ReleaseSourcePort,
   ScenePlannerPort,
@@ -35,10 +36,12 @@ export type PipelinePorts = {
   confidenceGate?: ConfidenceGatePort;
   /** Optional: when absent the desktop stage is skipped entirely. */
   desktopDemo?: DesktopDemoPort;
+  /** Optional: when absent narration generation is skipped entirely. */
+  narration?: NarrationPort;
 };
 
 /** Tracks how far the pipeline progressed for accurate failure attribution. */
-type StageProgress = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "manifest" | "completed";
+type StageProgress = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "narration" | "manifest" | "completed";
 
 export class StageFailure extends Error {
   constructor(
@@ -106,6 +109,13 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
     progress = "scenePlan";
     const scenePlan = await ports.scenePlanner(release, { gatedFeatureIds });
     store.recordArtifact({ stage: "scenePlan", value: scenePlan });
+
+    if (ports.narration) {
+      progress = "narration";
+      const narration = await ports.narration(release, scenePlan);
+      validateReleasePackageRelations({ release, scenePlan, narration });
+      store.recordArtifact({ stage: "narration", value: narration });
+    }
 
     progress = "manifest";
     const manifest: RenderManifest = await ports.renderer(release, scenePlan);
