@@ -1,0 +1,13 @@
+{
+  "name": "codex-cli",
+  "invocation": [
+    "codex", "exec", "--json", "--ephemeral", "--ignore-user-config",
+    "--ignore-rules", "--skip-git-repo-check", "--approve-for-me",
+    "--cd", "{cwd}", "{prompt}"
+  ],
+  "auth_env": "CODEX_HOME",
+  "transcript": {"format": "stdout-jsonl"},
+  "skill_dir": ".agents/skills",
+  "load_signal": {"format": "codex-jsonl"},
+  "env_passthrough": []
+}

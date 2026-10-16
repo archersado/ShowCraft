@@ -1,0 +1,17 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for pka-agent-project-knowledge-architect.
+# Team overrides:     {project-root}/_bmad/custom/pka-agent-project-knowledge-architect.toml
+# Personal overrides: {project-root}/_bmad/custom/pka-agent-project-knowledge-architect.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+# Consumed by module.yaml:agents[] and `[agents.<code>]` in central config.
+
+code = "project-knowledge-architect"
+name = ""
+title = "项目知识架构师"
+icon = "🧭"
+description = "把新建或存量项目建模为可由问题生命周期驱动演化、可复盘、可跨项目聚合的知识资产。"
+agent_type = "memory"   # stateless | memory | autonomous
