@@ -56,6 +56,16 @@ describe("CLI end-to-end: successful run on disk", () => {
     expect(parsed.scene.success).toBe(true);
     expect(parsed.manifest.success).toBe(true);
     expect(parsed.run.success).toBe(true);
+    if (parsed.scene.success && parsed.manifest.success) {
+      expect(parsed.scene.data.scenes.map((scene) => scene.featureId)).toEqual([
+        "intro", "mock-feature", "outro",
+      ]);
+      expect(parsed.manifest.data.volumes).toEqual([{
+        index: 1,
+        sceneIds: parsed.scene.data.scenes.map((scene) => scene.id),
+        plannedTotalSeconds: 40,
+      }]);
+    }
   });
 
   it("is byte-stable across identical runs", async () => {
@@ -102,5 +112,15 @@ describe("CLI end-to-end: demo entry point regression", () => {
     const run = JSON.parse(await readFile(join(result.runDirectory, "run.json"), "utf8"));
     expect(run).toMatchObject({ runId: "e2e-demo", status: "completed" });
     expect(run.artifacts).toEqual(["release.json", "scene.json", "manifest.json"]);
+  });
+
+  it("keeps mock runs at the 4-file set with no gate.json", async () => {
+    const root = await makeTempRoot();
+    const result = await runDemo({ outputRoot: root, runId: "e2e-no-gate" });
+
+    const files = (await readdir(result.runDirectory)).sort();
+    expect(files).toEqual(FILE_NAMES);
+    expect(files).not.toContain("gate.json");
+    expect(files).not.toContain("evidence.json");
   });
 });

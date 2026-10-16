@@ -46,6 +46,16 @@ describe("core end-to-end: success path", () => {
       true,
     );
     expect(runRecordSchema.safeParse(JSON.parse(bytesOf(store, "run.json"))).success).toBe(true);
+    const scenePlan = JSON.parse(bytesOf(store, "scene.json"));
+    const manifest = JSON.parse(bytesOf(store, "manifest.json"));
+    expect(scenePlan.scenes.map((scene: { featureId: string }) => scene.featureId)).toEqual([
+      "intro", "mock-feature", "outro",
+    ]);
+    expect(manifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: scenePlan.scenes.map((scene: { id: string }) => scene.id),
+      plannedTotalSeconds: 40,
+    }]);
   });
 
   it("is byte-stable for identical inputs", async () => {

@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { NarrationError } from "@showcraft/core";
 
 import { parseDemoArgs, runDemo } from "./main.js";
 
@@ -69,6 +70,75 @@ describe("runDemo", () => {
 
     await expect(runDemo({ outputRoot: root, runId: "../escape" })).rejects.toThrow(/Invalid run ID/);
   });
+
+  it("assembles an opt-in narration port without changing the default path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-tts-"));
+    temporaryPaths.push(root);
+    const result = await runDemo({
+      outputRoot: root,
+      runId: "tts-run",
+      tts: true,
+      voice: "en-US-EmmaMultilingualNeural",
+      createNarration: (runDirectory, voice) => async (release, scenePlan) => {
+        await Promise.all(scenePlan.scenes.map((scene) =>
+          writeFile(join(runDirectory, `narration-${scene.id}.mp3`), new Uint8Array([0xff, 0xf3])),
+        ));
+        return {
+          releaseVersion: release.version,
+          voice: voice!,
+          scenes: scenePlan.scenes.map((scene) => ({
+            sceneId: scene.id,
+            featureId: scene.featureId,
+            audioFile: `narration-${scene.id}.mp3`,
+            audioDurationMs: 1,
+            voice: voice!,
+            cues: [{ text: scene.narration, startMs: 0, endMs: 1 }],
+          })),
+        };
+      },
+    });
+
+    expect(await readdir(result.runDirectory)).toEqual([
+      "manifest.json",
+      "narration-scene-intro.mp3",
+      "narration-scene-mock-feature.mp3",
+      "narration-scene-outro.mp3",
+      "narration.json",
+      "release.json",
+      "run.json",
+      "scene.json",
+    ]);
+    const narration = JSON.parse(await readFile(join(result.runDirectory, "narration.json"), "utf8"));
+    expect(narration.scenes.map((scene: { sceneId: string }) => scene.sceneId)).toEqual([
+      "scene-intro", "scene-mock-feature", "scene-outro",
+    ]);
+  });
+
+  it("rejects a programmatic voice override when TTS is disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-voice-"));
+    temporaryPaths.push(root);
+    await expect(runDemo({ outputRoot: root, runId: "bad-voice", voice: "custom" })).rejects.toThrow(
+      /--voice requires --tts/,
+    );
+  });
+
+  it("persists a bounded phase-bearing narration failure reason", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-tts-failure-"));
+    temporaryPaths.push(root);
+    await expect(runDemo({
+      outputRoot: root,
+      runId: "tts-failure",
+      tts: true,
+      createNarration: () => () => {
+        throw new NarrationError("handshake", "service rejected", "service rejected");
+      },
+    })).rejects.toThrow(/handshake/);
+
+    const run = JSON.parse(await readFile(join(root, "tts-failure", "run.json"), "utf8"));
+    expect(run.failure).toMatchObject({ stage: "narration" });
+    expect(run.failure.reason).toContain("[handshake]");
+    expect(run.failure.reason.length).toBeLessThanOrEqual(2_048);
+  });
 });
 
 describe("parseDemoArgs", () => {
@@ -80,16 +150,57 @@ describe("parseDemoArgs", () => {
   it("rejects unsupported arguments", () => {
     expect(() => parseDemoArgs(["--unknown"])).toThrow(/Usage:/);
   });
+
+  it("accepts --desktop only together with --source", () => {
+    expect(parseDemoArgs(["--source", "release.md", "--desktop", "/startupos"])).toEqual({
+      source: "release.md",
+      desktopRoot: "/startupos",
+    });
+    expect(() => parseDemoArgs(["--desktop", "/startupos"])).toThrow(/requires --source/);
+  });
+
+  it("accepts --tts with an optional voice and rejects a voice alone", () => {
+    expect(parseDemoArgs(["--tts"])).toEqual({ tts: true });
+    expect(parseDemoArgs(["--tts", "--voice", "en-US-EmmaMultilingualNeural"])).toEqual({
+      tts: true,
+      voice: "en-US-EmmaMultilingualNeural",
+    });
+    expect(() => parseDemoArgs(["--voice", "en-US-EmmaMultilingualNeural"])).toThrow(
+      /--voice requires --tts/,
+    );
+    expect(() => parseDemoArgs(["--tts", "--voice", "--source", "release.md"])).toThrow(/Usage:/);
+  });
+
+  it("rejects programmatic desktop runs without a source before creating output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-cli-desktop-usage-"));
+    temporaryPaths.push(root);
+    await expect(
+      runDemo({ outputRoot: root, runId: "invalid-desktop", desktopRoot: "/startupos" }),
+    ).rejects.toThrow(/requires --source/);
+    await expect(stat(join(root, "invalid-desktop"))).rejects.toThrow();
+  });
 });
 
 describe("pnpm demo", () => {
   it("runs the root command and reports a completed run", async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), "showcraft-cli-command-"));
     temporaryPaths.push(outputRoot);
-    const pnpmEntrypoint = process.env.npm_execpath;
-
-    expect(pnpmEntrypoint).toBeTruthy();
-    const { stdout } = await execFileAsync(pnpmEntrypoint!, ["demo", "--", "--output", outputRoot], {
+    // npm_execpath points at the package-manager JS entry only when vitest
+    // is launched THROUGH that package manager — npm sets npm-cli.js, whose
+    // `demo` command does not exist. Run the pnpm entrypoint explicitly and
+    // skip gracefully when no JS entrypoint exists in this environment.
+    const nodeLibDir = join(dirname(dirname(process.execPath)), "lib", "node_modules");
+    const pnpmEntrypoint = join(nodeLibDir, "corepack", "dist", "pnpm.js");
+    if (
+      !(await stat(pnpmEntrypoint).then(() => true).catch(() => false)) &&
+      !(process.env.npm_execpath?.endsWith(".js") ?? false)
+    ) {
+      return;
+    }
+    const entry = (await stat(pnpmEntrypoint).then(() => true).catch(() => false))
+      ? pnpmEntrypoint
+      : process.env.npm_execpath!;
+    const { stdout } = await execFileAsync(process.execPath, [entry, "demo", "--", "--output", outputRoot], {
       cwd: process.cwd(),
     });
     const runDirectory = stdout.match(/^Run directory: (.+)$/m)?.[1];
