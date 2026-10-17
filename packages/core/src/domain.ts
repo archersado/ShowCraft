@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+import {
+  FEATURE_MAX_SECONDS,
+  FEATURE_MIN_SECONDS,
+  INTRO_FEATURE_ID,
+  INTRO_OUTRO_MAX_SECONDS,
+  INTRO_OUTRO_MIN_SECONDS,
+  OUTRO_FEATURE_ID,
+  VOLUME_LIMIT_SECONDS,
+} from "./durationOrchestration.js";
+
 /**
  * Domain contracts for ShowCraft. Two layers:
  * - entity schemas validate a single object's local fields and enums;
@@ -35,7 +45,7 @@ export const reviewStatusSchema = z.enum(["pending_review", "approved", "changes
 
 export const evidenceKindSchema = z.enum(["commit", "diff", "file", "symbol", "entry_point"]);
 
-export const narrationSourceSchema = z.enum(["narration", "human_supplement", "fallback"]);
+export const narrationSourceSchema = z.enum(["narration", "human_supplement", "fallback", "generated"]);
 
 // ---------------------------------------------------------------------------
 // Release brief
@@ -322,17 +332,52 @@ export const sceneSchema = z
     narration: z.string().min(1, "scene narration must not be empty"),
     /** Where the narration text came from; human supplements stay auditable. */
     narrationSource: narrationSourceSchema,
-    /** Planned duration in seconds; duration orchestration lives in later stories. */
+    /** Planned duration in seconds; duration orchestration landed in Story 4.2. */
     plannedDurationSeconds: z.number().positive("scene duration must be positive"),
   })
-  .strict();
+  .strict()
+  .superRefine((scene, context) => {
+    const synthetic = scene.featureId === INTRO_FEATURE_ID || scene.featureId === OUTRO_FEATURE_ID;
+    if (synthetic && scene.narrationSource !== "generated") {
+      context.addIssue({
+        code: "custom",
+        path: ["narrationSource"],
+        message: "intro/outro scenes must use generated narration source",
+      });
+    }
+    if (!synthetic && scene.narrationSource === "generated") {
+      context.addIssue({
+        code: "custom",
+        path: ["narrationSource"],
+        message: "generated narration source is reserved for intro/outro scenes",
+      });
+    }
+  });
+
+function addDuplicateSceneIdIssues(
+  scenes: readonly Scene[],
+  context: z.RefinementCtx,
+): void {
+  const seen = new Set<string>();
+  scenes.forEach((scene, index) => {
+    if (seen.has(scene.id)) {
+      context.addIssue({
+        code: "custom",
+        path: ["scenes", index, "id"],
+        message: "duplicate scene id",
+      });
+    }
+    seen.add(scene.id);
+  });
+}
 
 export const scenePlanSchema = z
   .object({
     releaseVersion: z.string().min(1, "scene plan release version must not be empty"),
     scenes: z.array(sceneSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((plan, context) => addDuplicateSceneIdIssues(plan.scenes, context));
 
 export type Scene = z.infer<typeof sceneSchema>;
 export type ScenePlan = z.infer<typeof scenePlanSchema>;
@@ -427,15 +472,47 @@ export type NarrationArtifact = z.infer<typeof narrationArtifactSchema>;
 
 export const renderFormatSchema = z.enum(["showcraft.mock-manifest/v1"]);
 
+export const volumeSchema = z
+  .object({
+    index: z.number().int().min(1, "volume index must be >= 1"),
+    sceneIds: z.array(sceneIdSchema).min(1, "volume scene ids must not be empty"),
+    plannedTotalSeconds: z.number().positive("volume planned duration must be positive"),
+  })
+  .strict();
+
 export const renderManifestSchema = z
   .object({
     format: renderFormatSchema,
     releaseVersion: z.string().min(1, "manifest release version must not be empty"),
     scenes: z.array(sceneSchema),
+    volumes: z.array(volumeSchema).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((manifest, context) => {
+    addDuplicateSceneIdIssues(manifest.scenes, context);
+    if (!manifest.volumes) return;
+    manifest.volumes.forEach((volume, index) => {
+      if (volume.index !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["volumes", index, "index"],
+          message: "volume indexes must be sequential starting at 1",
+        });
+      }
+    });
+    const projectedIds = manifest.volumes.flatMap((volume) => volume.sceneIds);
+    const sceneIds = manifest.scenes.map((scene) => scene.id);
+    if (JSON.stringify(projectedIds) !== JSON.stringify(sceneIds)) {
+      context.addIssue({
+        code: "custom",
+        path: ["volumes"],
+        message: "volume scene ids must match manifest scenes exactly and in order",
+      });
+    }
+  });
 
 export type RenderManifest = z.infer<typeof renderManifestSchema>;
+export type Volume = z.infer<typeof volumeSchema>;
 
 // ---------------------------------------------------------------------------
 // Run record and review decision (independent statuses by design)
@@ -515,13 +592,26 @@ export function formatIssues(issues: readonly z.ZodIssue[]): Array<{ path: strin
   }));
 }
 
-function collectFeatureIds(release: ReleaseBrief): Set<string> {
-  return new Set(release.features.map((feature) => feature.id));
+function collectFeatureIds(release: ReleaseBrief, allowSynthetic = false): Set<string> {
+  const ids = new Set(release.features.map((feature) => feature.id));
+  if (allowSynthetic) {
+    ids.add(INTRO_FEATURE_ID);
+    ids.add(OUTRO_FEATURE_ID);
+  }
+  return ids;
 }
 
 function assertUniqueFeatureIds(release: ReleaseBrief): void {
   const seen = new Set<string>();
   for (const feature of release.features) {
+    if (feature.id === INTRO_FEATURE_ID || feature.id === OUTRO_FEATURE_ID) {
+      throw new DomainValidationError([
+        {
+          path: `release.features[id=${feature.id}]`,
+          message: `reserved feature id "${feature.id}" conflicts with opening/closing scenes; rename the release section`,
+        },
+      ]);
+    }
     if (seen.has(feature.id)) {
       throw new DomainValidationError([
         {
@@ -534,8 +624,13 @@ function assertUniqueFeatureIds(release: ReleaseBrief): void {
   }
 }
 
-function assertReferences(release: ReleaseBrief, featureId: string, path: string): void {
-  if (!collectFeatureIds(release).has(featureId)) {
+function assertReferences(
+  release: ReleaseBrief,
+  featureId: string,
+  path: string,
+  allowSynthetic = false,
+): void {
+  if (!collectFeatureIds(release, allowSynthetic).has(featureId)) {
     throw new DomainValidationError([
       {
         path,
@@ -566,13 +661,13 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
     assertReferences(release, action.featureId, `actions.actions[featureId=${action.featureId}]`);
   }
   for (const scene of packageValue.scenePlan?.scenes ?? []) {
-    assertReferences(release, scene.featureId, `scenePlan.scenes[id=${scene.id}].featureId`);
+    assertReferences(release, scene.featureId, `scenePlan.scenes[id=${scene.id}].featureId`, true);
   }
   for (const scene of packageValue.narration?.scenes ?? []) {
-    assertReferences(release, scene.featureId, `narration.scenes[sceneId=${scene.sceneId}].featureId`);
+    assertReferences(release, scene.featureId, `narration.scenes[sceneId=${scene.sceneId}].featureId`, true);
   }
   for (const scene of packageValue.manifest?.scenes ?? []) {
-    assertReferences(release, scene.featureId, `manifest.scenes[id=${scene.id}].featureId`);
+    assertReferences(release, scene.featureId, `manifest.scenes[id=${scene.id}].featureId`, true);
   }
 
   const version = release.version;
@@ -710,6 +805,83 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
         message: `does not match release version "${version}"`,
       },
     ]);
+  }
+
+  if (packageValue.scenePlan) {
+    const { scenes } = packageValue.scenePlan;
+    const introIndexes = scenes.flatMap((scene, index) => scene.featureId === INTRO_FEATURE_ID ? [index] : []);
+    const outroIndexes = scenes.flatMap((scene, index) => scene.featureId === OUTRO_FEATURE_ID ? [index] : []);
+    if (introIndexes.length > 0 && (introIndexes.length !== 1 || introIndexes[0] !== 0)) {
+      throw new DomainValidationError([
+        { path: "scenePlan.scenes", message: "intro scene must appear exactly once as the first scene" },
+      ]);
+    }
+    if (outroIndexes.length > 0 && (outroIndexes.length !== 1 || outroIndexes[0] !== scenes.length - 1)) {
+      throw new DomainValidationError([
+        { path: "scenePlan.scenes", message: "outro scene must appear exactly once as the last scene" },
+      ]);
+    }
+  }
+
+  if (packageValue.scenePlan && packageValue.manifest?.volumes) {
+    const plannedScenes = packageValue.scenePlan.scenes;
+    const manifestScenes = packageValue.manifest.scenes;
+    if (plannedScenes[0]?.featureId !== INTRO_FEATURE_ID || plannedScenes.at(-1)?.featureId !== OUTRO_FEATURE_ID) {
+      throw new DomainValidationError([
+        { path: "scenePlan.scenes", message: "orchestrated scene plans require intro first and outro last" },
+      ]);
+    }
+    if (JSON.stringify(manifestScenes) !== JSON.stringify(plannedScenes)) {
+      throw new DomainValidationError([
+        { path: "manifest.scenes", message: "must match the scene plan exactly" },
+      ]);
+    }
+    const sceneById = new Map(manifestScenes.map((scene) => [scene.id, scene]));
+    for (const volume of packageValue.manifest.volumes) {
+      const expectedDuration = volume.sceneIds.reduce(
+        (total, sceneId) => total + (sceneById.get(sceneId)?.plannedDurationSeconds ?? 0),
+        0,
+      );
+      if (volume.plannedTotalSeconds !== expectedDuration) {
+        throw new DomainValidationError([
+          {
+            path: `manifest.volumes[index=${volume.index}].plannedTotalSeconds`,
+            message: `must equal the sum of its scene durations (${expectedDuration})`,
+          },
+        ]);
+      }
+      if (volume.plannedTotalSeconds > VOLUME_LIMIT_SECONDS) {
+        throw new DomainValidationError([
+          { path: `manifest.volumes[index=${volume.index}]`, message: `must not exceed ${VOLUME_LIMIT_SECONDS} seconds` },
+        ]);
+      }
+    }
+    for (const scene of plannedScenes) {
+      const [min, max] = scene.featureId === INTRO_FEATURE_ID || scene.featureId === OUTRO_FEATURE_ID
+        ? [INTRO_OUTRO_MIN_SECONDS, INTRO_OUTRO_MAX_SECONDS]
+        : [FEATURE_MIN_SECONDS, FEATURE_MAX_SECONDS];
+      if (scene.plannedDurationSeconds < min || scene.plannedDurationSeconds > max) {
+        throw new DomainValidationError([
+          {
+            path: `scenePlan.scenes[id=${scene.id}].plannedDurationSeconds`,
+            message: `must be within ${min}-${max} seconds`,
+          },
+        ]);
+      }
+    }
+    if (plannedScenes.some((scene) => scene.featureId === INTRO_FEATURE_ID) &&
+      packageValue.manifest.volumes[0]?.sceneIds[0] !== plannedScenes[0]?.id) {
+      throw new DomainValidationError([
+        { path: "manifest.volumes", message: "intro scene must be first in the first volume" },
+      ]);
+    }
+    const lastVolume = packageValue.manifest.volumes.at(-1);
+    if (plannedScenes.some((scene) => scene.featureId === OUTRO_FEATURE_ID) &&
+      lastVolume?.sceneIds.at(-1) !== plannedScenes.at(-1)?.id) {
+      throw new DomainValidationError([
+        { path: "manifest.volumes", message: "outro scene must be last in the final volume" },
+      ]);
+    }
   }
 
   // Gate ↔ scenePlan consistency: the gate result is the authority on which

@@ -80,7 +80,9 @@ describe("runDemo", () => {
       tts: true,
       voice: "en-US-EmmaMultilingualNeural",
       createNarration: (runDirectory, voice) => async (release, scenePlan) => {
-        await writeFile(join(runDirectory, "narration-scene-mock-feature.mp3"), new Uint8Array([0xff, 0xf3]));
+        await Promise.all(scenePlan.scenes.map((scene) =>
+          writeFile(join(runDirectory, `narration-${scene.id}.mp3`), new Uint8Array([0xff, 0xf3])),
+        ));
         return {
           releaseVersion: release.version,
           voice: voice!,
@@ -98,11 +100,17 @@ describe("runDemo", () => {
 
     expect(await readdir(result.runDirectory)).toEqual([
       "manifest.json",
+      "narration-scene-intro.mp3",
       "narration-scene-mock-feature.mp3",
+      "narration-scene-outro.mp3",
       "narration.json",
       "release.json",
       "run.json",
       "scene.json",
+    ]);
+    const narration = JSON.parse(await readFile(join(result.runDirectory, "narration.json"), "utf8"));
+    expect(narration.scenes.map((scene: { sceneId: string }) => scene.sceneId)).toEqual([
+      "scene-intro", "scene-mock-feature", "scene-outro",
     ]);
   });
 

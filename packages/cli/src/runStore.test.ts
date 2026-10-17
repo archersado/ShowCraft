@@ -81,6 +81,11 @@ describe("runDemo through the run store", () => {
     const run = JSON.parse(await readFile(join(result.runDirectory, "run.json"), "utf8"));
     expect(release.features).toHaveLength(1);
     expect(manifest.releaseVersion).toBe(release.version);
+    expect(manifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: ["scene-intro", "scene-mock-feature", "scene-outro"],
+      plannedTotalSeconds: 40,
+    }]);
     expect(run).toMatchObject({
       format: "showcraft.mock-run/v1",
       runId: "demo-fixed",

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rename, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -423,11 +423,4 @@ function tryClose(socket: WebSocketLike): void {
   } catch {
     // Closing after a failed handshake is best effort only.
   }
-}
-
-// Retained for compatibility with quarantine workflows that rename already-written media.
-export async function quarantineNarrationFile(path: string): Promise<string> {
-  const failedPath = `${path}.failed`;
-  await rename(path, failedPath);
-  return failedPath;
 }
