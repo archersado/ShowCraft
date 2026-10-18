@@ -6,6 +6,7 @@ import {
   createMockRenderer,
   createMockScenePlanner,
 } from "./ports.js";
+import { buildIntroOutroScenes, plannedFeatureDurationSeconds } from "./durationOrchestration.js";
 
 /**
  * Shared test fixtures. Not part of the public API surface (not exported
@@ -40,6 +41,23 @@ export function sampleScenePlan(release: ReleaseBrief = sampleRelease): ScenePla
     scenes: release.features.map((feature) =>
       sampleScene(feature.id, `scene-${feature.id}`),
     ),
+  };
+}
+
+export function sampleOrchestratedScenePlan(release: ReleaseBrief = sampleRelease): ScenePlan {
+  const { intro, outro } = buildIntroOutroScenes(release);
+  return {
+    releaseVersion: release.version,
+    scenes: [
+      intro,
+      ...release.features.map((feature) => ({
+        ...sampleScene(feature.id, `scene-${feature.id}`),
+        title: feature.title,
+        narration: feature.narration,
+        plannedDurationSeconds: plannedFeatureDurationSeconds(feature.narration),
+      })),
+      outro,
+    ],
   };
 }
 
