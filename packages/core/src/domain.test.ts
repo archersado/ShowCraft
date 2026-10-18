@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DomainValidationError,
+  compositionSchema,
   demoActionRecordSchema,
   demoActionsSchema,
   entryPointCandidateSchema,
@@ -16,7 +17,8 @@ import {
   validateReleasePackageRelations,
   type ReleasePackage,
 } from "./domain.js";
-import { sampleRelease, sampleScene } from "./testing.js";
+import { createMockRenderer } from "./ports.js";
+import { sampleOrchestratedScenePlan, sampleRelease, sampleScene } from "./testing.js";
 
 const release = sampleRelease;
 
@@ -221,6 +223,87 @@ describe("narrationArtifactSchema", () => {
       scenePlan,
       narration: { ...narration, scenes: [] },
     })).toThrow(/exactly one/);
+  });
+});
+
+describe("compositionSchema", () => {
+  const composition = {
+    format: "showcraft.remotion/v1" as const,
+    runId: "render-run",
+    volumes: [{
+      index: 1,
+      mp4File: "video-volume-1.mp4",
+      durationSeconds: 56,
+      sceneIds: ["scene-intro", "scene-perception-routing", "scene-outro"],
+    }],
+  };
+
+  it("accepts a strict, traceable per-volume rendering result", () => {
+    expect(compositionSchema.safeParse(composition).success).toBe(true);
+    expect(compositionSchema.safeParse({ ...composition, extra: true }).success).toBe(false);
+  });
+
+  it("rejects invalid file names, durations, and non-sequential indexes", () => {
+    expect(compositionSchema.safeParse({ ...composition, volumes: [{ ...composition.volumes[0], mp4File: "../x.mp4" }] }).success).toBe(false);
+    expect(compositionSchema.safeParse({ ...composition, volumes: [{ ...composition.volumes[0], durationSeconds: 0 }] }).success).toBe(false);
+    expect(compositionSchema.safeParse({ ...composition, volumes: [{ ...composition.volumes[0], index: 2 }] }).success).toBe(false);
+  });
+
+  it("requires canonical unique MP4 names", () => {
+    expect(compositionSchema.safeParse({
+      ...composition,
+      volumes: [
+        { ...composition.volumes[0]!, mp4File: "video-volume-2.mp4" },
+        { ...composition.volumes[0]!, index: 2, mp4File: "video-volume-2.mp4" },
+      ],
+    }).success).toBe(false);
+  });
+
+  it("validates composition volumes against manifest volumes", () => {
+    const scenePlan = sampleOrchestratedScenePlan(release);
+    const manifest = createMockRenderer()(release, scenePlan);
+    const valid = {
+      ...composition,
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    };
+    expect(() => validateReleasePackageRelations({ release, manifest, composition: valid })).not.toThrow();
+    expect(() => validateReleasePackageRelations({ release, manifest, composition: { ...valid, volumes: [] } })).toThrow(/exactly one/);
+    expect(() => validateReleasePackageRelations({ release, manifest, composition: { ...valid, volumes: [{ ...valid.volumes[0]!, durationSeconds: 1 }] } })).toThrow(/must match/);
+    const narration = {
+      releaseVersion: release.version,
+      voice: "v",
+      scenes: scenePlan.scenes.map((scene) => ({
+        sceneId: scene.id,
+        featureId: scene.featureId,
+        audioFile: `narration-${scene.id}.mp3`,
+        audioDurationMs: 100,
+        voice: "v",
+        cues: [{ text: "x", startMs: 0, endMs: 90 }],
+      })),
+    };
+    expect(() => validateReleasePackageRelations({
+      release,
+      narration,
+      manifest,
+      composition: valid,
+    })).toThrow(/audioFiles/);
+    expect(() => validateReleasePackageRelations({
+      release,
+      narration,
+      manifest,
+      composition: {
+        ...valid,
+        volumes: valid.volumes.map((volume) => ({
+          ...volume,
+          audioFiles: volume.sceneIds.map((sceneId) => `narration-${sceneId}.mp3`),
+        })),
+      },
+    })).not.toThrow();
   });
 });
 

@@ -1,5 +1,7 @@
 export {
   confidenceSchema,
+  compositionSchema,
+  compositionVolumeSchema,
   demoActionObservationsSchema,
   demoActionReasonSchema,
   demoActionRecordSchema,
@@ -40,6 +42,8 @@ export {
 
 export type {
   EntryPointCandidate,
+  Composition,
+  CompositionVolume,
   DemoActionRecord,
   DemoActions,
   EvidenceEntry,
@@ -93,6 +97,7 @@ export {
 
 export type {
   CodeEvidencePort,
+  CompositionPort,
   ConfidenceGatePort,
   DesktopDemoPort,
   DesktopRunnerPort,

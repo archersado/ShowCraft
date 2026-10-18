@@ -32,7 +32,7 @@ describe("RunStoreCore", () => {
         evidenceIds: [],
       })),
     };
-    for (const stage of ["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest"] as const) {
+    for (const stage of ["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest", "composition"] as const) {
       const artifact =
         stage === "release"
           ? release
@@ -57,7 +57,18 @@ describe("RunStoreCore", () => {
                       cues: [{ text: scene.narration, startMs: 0, endMs: 900 }],
                     })),
                   }
-                  : manifest;
+                  : stage === "manifest"
+                    ? manifest
+                    : {
+                      format: "showcraft.remotion/v1" as const,
+                      runId: "run-ok",
+                      volumes: manifest.volumes!.map((volume) => ({
+                        index: volume.index,
+                        mp4File: `video-volume-${volume.index}.mp4`,
+                        durationSeconds: volume.plannedTotalSeconds,
+                        sceneIds: volume.sceneIds,
+                      })),
+                    };
       store.recordArtifact({ stage, value: artifact });
     }
     store.complete();
@@ -72,6 +83,7 @@ describe("RunStoreCore", () => {
       "scene.json",
       "narration.json",
       "manifest.json",
+      "composition.json",
       "run.json",
     ]);
     const record = JSON.parse(
@@ -86,6 +98,7 @@ describe("RunStoreCore", () => {
       "scene.json",
       "narration.json",
       "manifest.json",
+      "composition.json",
     ]);
     const persistedManifest = JSON.parse(
       new TextDecoder().decode(files.find((file) => file.fileName === "manifest.json")?.bytes),
@@ -239,11 +252,12 @@ describe("RunStoreCore", () => {
   });
 
   it("exposes stable stage ordering and file names", () => {
-    expect(runStageOrder).toEqual(["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest"]);
+    expect(runStageOrder).toEqual(["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest", "composition"]);
     expect(stageFileNames.release).toBe("release.json");
     expect(stageFileNames.evidence).toBe("evidence.json");
     expect(stageFileNames.gate).toBe("gate.json");
     expect(stageFileNames.desktop).toBe("actions.json");
     expect(stageFileNames.narration).toBe("narration.json");
+    expect(stageFileNames.composition).toBe("composition.json");
   });
 });

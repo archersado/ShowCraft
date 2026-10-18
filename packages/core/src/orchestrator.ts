@@ -1,10 +1,12 @@
 import {
   DomainValidationError,
+  compositionSchema,
   narrationArtifactSchema,
   renderManifestSchema,
   scenePlanSchema,
   validateReleasePackageRelations,
   type DemoActions,
+  type Composition,
   type EvidencePack,
   type GateResult,
   type NarrationArtifact,
@@ -17,6 +19,7 @@ import type { RunStage } from "./runStore.js";
 import { RunStoreCore } from "./runStore.js";
 import type {
   CodeEvidencePort,
+  CompositionPort,
   ConfidenceGatePort,
   DesktopDemoPort,
   NarrationPort,
@@ -46,10 +49,14 @@ export type PipelinePorts = {
   desktopDemo?: DesktopDemoPort;
   /** Optional: when absent narration generation is skipped entirely. */
   narration?: NarrationPort;
+  /** Optional: when absent video rendering is skipped entirely. */
+  composition?: CompositionPort;
+  /** Filesystem anchor supplied by the CLI only when composition is enabled. */
+  runDirectory?: string;
 };
 
 /** Tracks how far the pipeline progressed for accurate failure attribution. */
-type StageProgress = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "narration" | "manifest" | "completed";
+type StageProgress = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "narration" | "manifest" | "composition" | "completed";
 
 export class StageFailure extends Error {
   constructor(
@@ -75,6 +82,12 @@ function parseNarration(value: unknown): NarrationArtifact {
 
 function parseManifest(value: unknown): RenderManifest {
   const result = parseWithSchema(renderManifestSchema, value);
+  if (!result.success) throw new DomainValidationError(result.issues);
+  return result.value;
+}
+
+function parseComposition(value: unknown): Composition {
+  const result = parseWithSchema(compositionSchema, value);
   if (!result.success) throw new DomainValidationError(result.issues);
   return result.value;
 }
@@ -160,6 +173,30 @@ export async function runPipeline(ports: PipelinePorts, store: RunStoreCore): Pr
       manifest,
     });
     store.recordArtifact({ stage: "manifest", value: manifest });
+
+    if (ports.composition) {
+      progress = "composition";
+      if (!ports.runDirectory) throw new Error("composition requires a run directory");
+      const composition = parseComposition(await ports.composition({
+        runId: store.id,
+        runDirectory: ports.runDirectory,
+        manifest,
+        ...(narrationArtifact ? { narration: narrationArtifact } : {}),
+      }));
+      if (composition.runId !== store.id) {
+        throw new DomainValidationError([{
+          path: "composition.runId",
+          message: `does not match current run id "${store.id}"`,
+        }]);
+      }
+      validateReleasePackageRelations({
+        release,
+        ...(narrationArtifact ? { narration: narrationArtifact } : {}),
+        manifest,
+        composition,
+      });
+      store.recordArtifact({ stage: "composition", value: composition });
+    }
 
     progress = "completed";
     store.complete();
