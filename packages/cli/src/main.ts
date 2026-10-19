@@ -21,14 +21,18 @@ import {
   validateLocalSource,
   isSecretPath,
   type CodeEvidencePort,
+  type CompositionPort,
   type ConfidenceGatePort,
   type EvidenceResult,
+  type NarrationPort,
   type ReleaseBrief,
 } from "@showcraft/core";
 
 import { createRunDirectory, persistRunEvents } from "./runStore.js";
 import { collectCommits, collectDiffSample, discoverGitRepo, resolveTagRange } from "./gitEvidence.js";
 import { createStartUpOSDemoActions } from "./desktopActions.js";
+import { createEdgeTtsNarration } from "./edgeTtsNarration.js";
+import { createRemotionRenderer } from "./remotionRender.js";
 
 export type DemoOptions = {
   outputRoot?: string;
@@ -36,6 +40,11 @@ export type DemoOptions = {
   cwd?: string;
   source?: string;
   desktopRoot?: string;
+  tts?: boolean;
+  render?: boolean;
+  voice?: string;
+  createNarration?: (runDirectory: string, voice?: string) => NarrationPort;
+  createComposition?: (runDirectory: string) => CompositionPort;
 };
 
 export type DemoResult = {
@@ -46,6 +55,12 @@ export type DemoResult = {
 export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
   if (options.desktopRoot && !options.source) {
     throw new Error("--desktop requires --source");
+  }
+  if (options.desktopRoot && options.render) {
+    console.warn("--desktop + --render currently renders text cards only; recorded desktop media is not composited");
+  }
+  if (options.voice && !options.tts) {
+    throw new Error("--voice requires --tts");
   }
   const outputRoot = options.outputRoot ?? "runs";
   const runId = options.runId ?? `demo-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -76,6 +91,13 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
           runDirectory,
         })
       : undefined;
+  const narration = options.tts
+    ? (options.createNarration?.(runDirectory, options.voice) ??
+      createEdgeTtsNarration({ runDirectory, voice: options.voice }))
+    : undefined;
+  const composition = options.render
+    ? (options.createComposition?.(runDirectory) ?? createRemotionRenderer())
+    : undefined;
   // CLI assembles the adapters; core only sees the ports.
   await runPipeline(
     {
@@ -85,6 +107,8 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       ...(codeEvidence ? { codeEvidence } : {}),
       ...(confidenceGate ? { confidenceGate } : {}),
       ...(desktopDemo ? { desktopDemo } : {}),
+      ...(narration ? { narration } : {}),
+      ...(composition ? { composition, runDirectory } : {}),
     },
     store,
   );
@@ -230,25 +254,40 @@ const emptyEvidencePort: CodeEvidencePort = (release) => emptyEvidence(release);
 
 export function parseDemoArgs(
   args: readonly string[],
-): Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot"> {
+): Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot" | "tts" | "voice" | "render"> {
   const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
 
-  const parsed: Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot"> = {};
-  for (let index = 0; index < normalizedArgs.length; index += 2) {
+  const parsed: Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot" | "tts" | "voice" | "render"> = {};
+  for (let index = 0; index < normalizedArgs.length;) {
     const flag = normalizedArgs[index];
     const value = normalizedArgs[index + 1];
     if (flag === "--output" && value) {
       parsed.outputRoot = value;
+      index += 2;
     } else if (flag === "--source" && value) {
       parsed.source = value;
+      index += 2;
     } else if (flag === "--desktop" && value) {
       parsed.desktopRoot = value;
+      index += 2;
+    } else if (flag === "--tts") {
+      parsed.tts = true;
+      index += 1;
+    } else if (flag === "--render") {
+      parsed.render = true;
+      index += 1;
+    } else if (flag === "--voice" && value && !value.startsWith("--")) {
+      parsed.voice = value;
+      index += 2;
     } else {
-      throw new Error("Usage: pnpm demo -- [--output <directory>] [--source <markdown-path> [--desktop <startupos-root>]]");
+      throw new Error("Usage: pnpm demo -- [--output <directory>] [--source <markdown-path> [--desktop <startupos-root>]] [--tts [--voice <name>]] [--render]");
     }
   }
   if (parsed.desktopRoot && !parsed.source) {
     throw new Error("Usage: --desktop requires --source");
+  }
+  if (parsed.voice && !parsed.tts) {
+    throw new Error("Usage: --voice requires --tts");
   }
   return parsed;
 }

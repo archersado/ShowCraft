@@ -1,5 +1,7 @@
 export {
   confidenceSchema,
+  compositionSchema,
+  compositionVolumeSchema,
   demoActionObservationsSchema,
   demoActionReasonSchema,
   demoActionRecordSchema,
@@ -16,11 +18,15 @@ export {
   gateReasonSchema,
   gateResultSchema,
   narrationSourceSchema,
+  narrationArtifactSchema,
+  narratedSceneSchema,
+  subtitleCueSchema,
   releaseFeatureSchema,
   releaseBriefSchema,
   releasePackageSchema,
   renderFormatSchema,
   renderManifestSchema,
+  volumeSchema,
   reviewDecisionSchema,
   reviewStatusSchema,
   runFormatSchema,
@@ -36,6 +42,8 @@ export {
 
 export type {
   EntryPointCandidate,
+  Composition,
+  CompositionVolume,
   DemoActionRecord,
   DemoActions,
   EvidenceEntry,
@@ -45,16 +53,20 @@ export type {
   GateDecision,
   GateReason,
   GateResult,
+  NarratedScene,
+  NarrationArtifact,
   ReleaseBrief,
   ReleaseFeature,
   ReleasePackage,
   RenderManifest,
+  Volume,
   ReviewDecision,
   ReviewStatus,
   RunRecord,
   RunStatus,
   Scene,
   ScenePlan,
+  SubtitleCue,
 } from "./domain.js";
 
 export {
@@ -85,10 +97,12 @@ export {
 
 export type {
   CodeEvidencePort,
+  CompositionPort,
   ConfidenceGatePort,
   DesktopDemoPort,
   DesktopRunnerPort,
   DesktopStartInfo,
+  NarrationPort,
   EvidenceResult,
   ReleaseSourcePort,
   RendererPort,
@@ -98,11 +112,32 @@ export type {
 
 export { DesktopRunnerError } from "./ports.js";
 export type { DesktopRunnerErrorPhase } from "./ports.js";
+export { NarrationError } from "./ports.js";
+export type { NarrationErrorPhase } from "./ports.js";
 
 export { runPipeline } from "./orchestrator.js";
 export type { PipelinePorts } from "./orchestrator.js";
 
 export { applyConfidenceGate, gateThreshold } from "./confidenceGate.js";
+
+export {
+  FEATURE_DURATION_SECONDS,
+  FEATURE_MAX_SECONDS,
+  FEATURE_MIN_SECONDS,
+  INTRO_FEATURE_ID,
+  INTRO_OUTRO_DURATION_SECONDS,
+  INTRO_OUTRO_MAX_SECONDS,
+  INTRO_OUTRO_MIN_SECONDS,
+  OUTRO_FEATURE_ID,
+  VOLUME_LIMIT_SECONDS,
+  DurationOrchestrationError,
+  buildIntroOutroScenes,
+  estimateTotalSeconds,
+  planVolumes,
+  plannedFeatureDurationSeconds,
+} from "./durationOrchestration.js";
+
+export type { PlannedVolume } from "./durationOrchestration.js";
 
 export {
   collectTokens,

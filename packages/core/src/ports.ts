@@ -1,12 +1,20 @@
 import type {
   DemoActionRecord,
+  Composition,
   EntryPointCandidate,
   EvidencePack,
   GateResult,
+  NarrationArtifact,
   ReleaseBrief,
   RenderManifest,
   ScenePlan,
 } from "./domain.js";
+import {
+  buildIntroOutroScenes,
+  estimateTotalSeconds,
+  planVolumes,
+  plannedFeatureDurationSeconds,
+} from "./durationOrchestration.js";
 
 /** Execute the gate-qualified desktop demo and return one auditable record per decision. */
 export type DesktopDemoPort = (
@@ -43,6 +51,31 @@ export type RendererPort = (
   release: ReleaseBrief,
   scenePlan: ScenePlan,
 ) => Promise<RenderManifest> | RenderManifest;
+
+export type NarrationPort = (
+  release: ReleaseBrief,
+  scenePlan: ScenePlan,
+) => Promise<NarrationArtifact> | NarrationArtifact;
+
+export type CompositionPort = (input: {
+  runId: string;
+  runDirectory: string;
+  manifest: RenderManifest;
+  narration?: NarrationArtifact;
+}) => Promise<Composition> | Composition;
+
+export type NarrationErrorPhase = "handshake" | "synthesize";
+
+export class NarrationError extends Error {
+  constructor(
+    readonly phase: NarrationErrorPhase,
+    readonly diagnostics: string,
+    message: string,
+  ) {
+    super(`[${phase}] ${message}`);
+    this.name = "NarrationError";
+  }
+}
 
 /**
  * Lifecycle outcome of a successful desktop `start()`: the app is ready to be
@@ -135,24 +168,37 @@ export function createMockReleaseSource(): ReleaseSourcePort {
 export function createMockScenePlanner(): ScenePlannerPort {
   return (release, context) => {
     const gated = context?.gatedFeatureIds;
+    const { intro, outro } = buildIntroOutroScenes(release);
     return {
       releaseVersion: release.version,
-      scenes: release.features.map((feature) => ({
-        id: `scene-${feature.id}`,
-        featureId: feature.id,
-        title: feature.title,
-        narration: feature.narration,
-        narrationSource: gated?.has(feature.id) ? ("fallback" as const) : ("narration" as const),
-        plannedDurationSeconds: 15,
-      })),
+      scenes: [
+        intro,
+        ...release.features.map((feature) => ({
+          id: `scene-${feature.id}`,
+          featureId: feature.id,
+          title: feature.title,
+          narration: feature.narration,
+          narrationSource: gated?.has(feature.id) ? ("fallback" as const) : ("narration" as const),
+          plannedDurationSeconds: plannedFeatureDurationSeconds(feature.narration),
+        })),
+        outro,
+      ],
     };
   };
 }
 
 export function createMockRenderer(): RendererPort {
-  return (release, scenePlan) => ({
-    format: "showcraft.mock-manifest/v1",
-    releaseVersion: release.version,
-    scenes: scenePlan.scenes,
-  });
+  return (release, scenePlan) => {
+    const volumes = planVolumes(scenePlan.scenes).map((volume, index) => ({
+      index: index + 1,
+      sceneIds: volume.scenes.map((scene) => scene.id),
+      plannedTotalSeconds: estimateTotalSeconds(volume.scenes),
+    }));
+    return {
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes: scenePlan.scenes,
+      volumes,
+    };
+  };
 }

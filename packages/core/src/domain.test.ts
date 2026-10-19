@@ -2,19 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   DomainValidationError,
+  compositionSchema,
   demoActionRecordSchema,
   demoActionsSchema,
   entryPointCandidateSchema,
   evidencePackSchema,
   gateResultSchema,
+  narrationArtifactSchema,
   releaseBriefSchema,
   renderManifestSchema,
   reviewDecisionSchema,
   runRecordSchema,
   scenePlanSchema,
   validateReleasePackageRelations,
+  type ReleasePackage,
 } from "./domain.js";
-import { sampleRelease, sampleScene } from "./testing.js";
+import { createMockRenderer } from "./ports.js";
+import { sampleOrchestratedScenePlan, sampleRelease, sampleScene } from "./testing.js";
 
 const release = sampleRelease;
 
@@ -49,6 +53,16 @@ describe("releaseBriefSchema", () => {
     };
     expect(() => validateReleasePackageRelations({ release: duplicated })).toThrow(
       DomainValidationError,
+    );
+  });
+
+  it.each(["intro", "outro"])("rejects reserved feature id %s", (id) => {
+    const reserved = {
+      ...release,
+      features: [{ ...release.features[0]!, id }],
+    };
+    expect(() => validateReleasePackageRelations({ release: reserved })).toThrow(
+      /reserved feature id/,
     );
   });
 
@@ -132,6 +146,164 @@ describe("releaseBriefSchema", () => {
         result.error.issues.some((issue) => issue.path.join(".") === "features.0.sourceRef.startLine"),
       ).toBe(true);
     }
+  });
+});
+
+describe("narrationArtifactSchema", () => {
+  const artifact = {
+    releaseVersion: "v1",
+    voice: "zh-CN-XiaoxiaoNeural",
+    scenes: [{
+      sceneId: "scene-one",
+      featureId: "feature-one",
+      audioFile: "narration-scene-one.mp3",
+      audioDurationMs: 1_000,
+      voice: "zh-CN-XiaoxiaoNeural",
+      cues: [{ text: "中文", startMs: 100, endMs: 300 }],
+    }],
+  };
+
+  it("accepts valid word-level timing", () => {
+    expect(narrationArtifactSchema.safeParse(artifact).success).toBe(true);
+  });
+
+  it("rejects non-positive cue spans", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.cues[0]!.endMs = 100;
+    expect(narrationArtifactSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects cues whose starts move backwards", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.cues.push({ text: "倒序", startMs: 50, endMs: 80 });
+    expect(narrationArtifactSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects path-like audio file references", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.audioFile = "../audio.mp3";
+    expect(narrationArtifactSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects timing beyond the audio duration, duplicate files, and conflicting voices", () => {
+    const invalid = structuredClone(artifact);
+    invalid.scenes[0]!.cues[0]!.endMs = 2_000;
+    invalid.scenes.push({
+      ...structuredClone(invalid.scenes[0]!),
+      sceneId: "scene-two",
+      voice: "en-US-EmmaMultilingualNeural",
+    });
+    const result = narrationArtifactSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(
+        expect.arrayContaining(["scenes.0.cues", "scenes.1.audioFile", "scenes.1.voice"]),
+      );
+    }
+  });
+
+  it("validates narration against release and scene-plan relations", () => {
+    const scenePlan = {
+      releaseVersion: release.version,
+      scenes: [sampleScene(release.features[0]!.id, "scene-one")],
+    };
+    const narration = {
+      ...artifact,
+      releaseVersion: release.version,
+      scenes: [{ ...artifact.scenes[0]!, featureId: release.features[0]!.id }],
+    };
+    expect(() => validateReleasePackageRelations({ release, scenePlan, narration })).not.toThrow();
+    expect(() => validateReleasePackageRelations({
+      release,
+      scenePlan,
+      narration: { ...narration, releaseVersion: "wrong" },
+    })).toThrow(/narration.releaseVersion/);
+    expect(() => validateReleasePackageRelations({
+      release,
+      scenePlan,
+      narration: { ...narration, scenes: [] },
+    })).toThrow(/exactly one/);
+  });
+});
+
+describe("compositionSchema", () => {
+  const composition = {
+    format: "showcraft.remotion/v1" as const,
+    runId: "render-run",
+    volumes: [{
+      index: 1,
+      mp4File: "video-volume-1.mp4",
+      durationSeconds: 56,
+      sceneIds: ["scene-intro", "scene-perception-routing", "scene-outro"],
+    }],
+  };
+
+  it("accepts a strict, traceable per-volume rendering result", () => {
+    expect(compositionSchema.safeParse(composition).success).toBe(true);
+    expect(compositionSchema.safeParse({ ...composition, extra: true }).success).toBe(false);
+  });
+
+  it("rejects invalid file names, durations, and non-sequential indexes", () => {
+    expect(compositionSchema.safeParse({ ...composition, volumes: [{ ...composition.volumes[0], mp4File: "../x.mp4" }] }).success).toBe(false);
+    expect(compositionSchema.safeParse({ ...composition, volumes: [{ ...composition.volumes[0], durationSeconds: 0 }] }).success).toBe(false);
+    expect(compositionSchema.safeParse({ ...composition, volumes: [{ ...composition.volumes[0], index: 2 }] }).success).toBe(false);
+  });
+
+  it("requires canonical unique MP4 names", () => {
+    expect(compositionSchema.safeParse({
+      ...composition,
+      volumes: [
+        { ...composition.volumes[0]!, mp4File: "video-volume-2.mp4" },
+        { ...composition.volumes[0]!, index: 2, mp4File: "video-volume-2.mp4" },
+      ],
+    }).success).toBe(false);
+  });
+
+  it("validates composition volumes against manifest volumes", () => {
+    const scenePlan = sampleOrchestratedScenePlan(release);
+    const manifest = createMockRenderer()(release, scenePlan);
+    const valid = {
+      ...composition,
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    };
+    expect(() => validateReleasePackageRelations({ release, manifest, composition: valid })).not.toThrow();
+    expect(() => validateReleasePackageRelations({ release, manifest, composition: { ...valid, volumes: [] } })).toThrow(/exactly one/);
+    expect(() => validateReleasePackageRelations({ release, manifest, composition: { ...valid, volumes: [{ ...valid.volumes[0]!, durationSeconds: 1 }] } })).toThrow(/must match/);
+    const narration = {
+      releaseVersion: release.version,
+      voice: "v",
+      scenes: scenePlan.scenes.map((scene) => ({
+        sceneId: scene.id,
+        featureId: scene.featureId,
+        audioFile: `narration-${scene.id}.mp3`,
+        audioDurationMs: 100,
+        voice: "v",
+        cues: [{ text: "x", startMs: 0, endMs: 90 }],
+      })),
+    };
+    expect(() => validateReleasePackageRelations({
+      release,
+      narration,
+      manifest,
+      composition: valid,
+    })).toThrow(/audioFiles/);
+    expect(() => validateReleasePackageRelations({
+      release,
+      narration,
+      manifest,
+      composition: {
+        ...valid,
+        volumes: valid.volumes.map((volume) => ({
+          ...volume,
+          audioFiles: volume.sceneIds.map((sceneId) => `narration-${sceneId}.mp3`),
+        })),
+      },
+    })).not.toThrow();
   });
 });
 
@@ -374,6 +546,28 @@ describe("scenePlanSchema", () => {
     };
     expect(scenePlanSchema.safeParse(plan).success).toBe(false);
   });
+
+  it("requires generated provenance only for intro/outro scenes", () => {
+    expect(scenePlanSchema.safeParse({
+      releaseVersion: release.version,
+      scenes: [{ ...scene("perception-routing", "scene-1"), narrationSource: "generated" }],
+    }).success).toBe(false);
+    expect(scenePlanSchema.safeParse({
+      releaseVersion: release.version,
+      scenes: [{ ...scene("intro", "scene-intro"), narrationSource: "narration" }],
+    }).success).toBe(false);
+    expect(scenePlanSchema.safeParse({
+      releaseVersion: release.version,
+      scenes: [{ ...scene("intro", "scene-intro"), narrationSource: "generated" }],
+    }).success).toBe(true);
+  });
+
+  it("rejects duplicate scene ids", () => {
+    expect(scenePlanSchema.safeParse({
+      releaseVersion: release.version,
+      scenes: [scene("perception-routing", "scene-1"), scene("im-routing", "scene-1")],
+    }).success).toBe(false);
+  });
 });
 
 describe("renderManifestSchema", () => {
@@ -384,6 +578,59 @@ describe("renderManifestSchema", () => {
       scenes: [scene("perception-routing", "scene-1")],
     };
     expect(renderManifestSchema.safeParse(manifest).success).toBe(false);
+  });
+
+  it("accepts an ordered complete volume projection", () => {
+    const scenes = [scene("perception-routing", "scene-1"), scene("im-routing", "scene-2")];
+    expect(renderManifestSchema.safeParse({
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes,
+      volumes: [{ index: 1, sceneIds: ["scene-1", "scene-2"], plannedTotalSeconds: 30 }],
+    }).success).toBe(true);
+  });
+
+  it.each([
+    [["scene-1"], "omission"],
+    [["scene-1", "scene-1", "scene-2"], "duplicate"],
+    [["scene-2", "scene-1"], "reordering"],
+  ])("rejects a volume projection with %s (%s)", (sceneIds) => {
+    const scenes = [scene("perception-routing", "scene-1"), scene("im-routing", "scene-2")];
+    expect(renderManifestSchema.safeParse({
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes,
+      volumes: [{ index: 1, sceneIds, plannedTotalSeconds: 30 }],
+    }).success).toBe(false);
+  });
+
+  it.each([
+    [[0, 2], "zero-based"],
+    [[2, 3], "does not start at one"],
+    [[1, 3], "gap"],
+    [[1, 1], "duplicate"],
+  ])("rejects %s volume indexes (%s)", (indexes) => {
+    const scenes = [scene("perception-routing", "scene-1"), scene("im-routing", "scene-2")];
+    expect(renderManifestSchema.safeParse({
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes,
+      volumes: indexes.map((index, volumeIndex) => ({
+        index,
+        sceneIds: [scenes[volumeIndex]!.id],
+        plannedTotalSeconds: 15,
+      })),
+    }).success).toBe(false);
+  });
+
+  it("rejects duplicate scene ids even when the volume projection matches", () => {
+    const scenes = [scene("perception-routing", "scene-1"), scene("im-routing", "scene-1")];
+    expect(renderManifestSchema.safeParse({
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes,
+      volumes: [{ index: 1, sceneIds: ["scene-1", "scene-1"], plannedTotalSeconds: 30 }],
+    }).success).toBe(false);
   });
 });
 
@@ -447,6 +694,44 @@ describe("releasePackageSchema relations", () => {
     );
   });
 
+  it.each<[string, ReleasePackage]>([
+    ["evidence", {
+      release,
+      evidence: {
+        releaseVersion: release.version,
+        entries: [{ id: "ev-intro", featureId: "intro", kind: "commit", reference: { location: "abc" }, confidence: 0.5 }],
+      },
+    }],
+    ["entry point", {
+      release,
+      entryPoints: [{ id: "entry-intro", featureId: "intro", description: "入口", confidence: 0.5, evidenceIds: ["ev-intro"] }],
+    }],
+    ["gate", {
+      release,
+      gate: {
+        releaseVersion: release.version,
+        threshold: 0.8,
+        decisions: [{ featureId: "intro", reason: "no_evidence", automatable: false, evidenceIds: [] }],
+      },
+    }],
+    ["desktop action", {
+      release,
+      actions: {
+        releaseVersion: release.version,
+        threshold: 0.8,
+        actions: [{
+          featureId: "intro",
+          status: "skipped",
+          reason: "no_evidence",
+          sourceRef: { sectionIndex: 1, sectionTitle: "intro", startLine: 1, endLine: 1 },
+          evidenceIds: [],
+        }],
+      },
+    }],
+  ])("does not allow synthetic ids in %s references", (_label, packageValue) => {
+    expect(() => validateReleasePackageRelations(packageValue)).toThrow(/unknown featureId "intro"/);
+  });
+
   it("rejects a manifest whose release version mismatches the brief", () => {
     const mismatched = {
       ...basePackage,
@@ -455,6 +740,91 @@ describe("releasePackageSchema relations", () => {
     expect(() => validateReleasePackageRelations(mismatched)).toThrow(
       /does not match release version/,
     );
+  });
+
+  it("validates orchestrated volume durations, windows, and intro/outro placement", () => {
+    const scenes = [
+      { ...scene("intro", "scene-intro"), narrationSource: "generated" as const, plannedDurationSeconds: 12 },
+      { ...scene("perception-routing", "scene-1"), plannedDurationSeconds: 16 },
+      { ...scene("outro", "scene-outro"), narrationSource: "generated" as const, plannedDurationSeconds: 12 },
+    ];
+    const orchestrated = {
+      release,
+      scenePlan: { releaseVersion: release.version, scenes },
+      manifest: {
+        format: "showcraft.mock-manifest/v1" as const,
+        releaseVersion: release.version,
+        scenes,
+        volumes: [{ index: 1, sceneIds: scenes.map((item) => item.id), plannedTotalSeconds: 40 }],
+      },
+    };
+    expect(() => validateReleasePackageRelations(orchestrated)).not.toThrow();
+    expect(() => validateReleasePackageRelations({
+      ...orchestrated,
+      manifest: {
+        ...orchestrated.manifest,
+        volumes: [{ ...orchestrated.manifest.volumes[0]!, plannedTotalSeconds: 41 }],
+      },
+    })).toThrow(/sum of its scene durations/);
+    const outOfWindowScenes = scenes.map((item) => item.featureId === "perception-routing"
+      ? { ...item, plannedDurationSeconds: 21 }
+      : item);
+    expect(() => validateReleasePackageRelations({
+      ...orchestrated,
+      scenePlan: { ...orchestrated.scenePlan, scenes: outOfWindowScenes },
+      manifest: {
+        ...orchestrated.manifest,
+        scenes: outOfWindowScenes,
+        volumes: [{ ...orchestrated.manifest.volumes[0]!, plannedTotalSeconds: 45 }],
+      },
+    })).toThrow(/12-20/);
+    expect(() => validateReleasePackageRelations({
+      ...orchestrated,
+      scenePlan: { ...orchestrated.scenePlan, scenes: scenes.slice(1) },
+      manifest: { ...orchestrated.manifest, scenes: scenes.slice(1), volumes: [{ index: 1, sceneIds: ["scene-1", "scene-outro"], plannedTotalSeconds: 28 }] },
+    })).toThrow(/require intro first/);
+    expect(() => validateReleasePackageRelations({
+      ...orchestrated,
+      scenePlan: { ...orchestrated.scenePlan, scenes: scenes.slice(0, -1) },
+      manifest: { ...orchestrated.manifest, scenes: scenes.slice(0, -1), volumes: [{ index: 1, sceneIds: ["scene-intro", "scene-1"], plannedTotalSeconds: 28 }] },
+    })).toThrow(/outro last/);
+    const misplacedScenes = [scenes[1]!, scenes[0]!, scenes[2]!];
+    expect(() => validateReleasePackageRelations({
+      ...orchestrated,
+      scenePlan: { ...orchestrated.scenePlan, scenes: misplacedScenes },
+      manifest: {
+        ...orchestrated.manifest,
+        scenes: misplacedScenes,
+        volumes: [{ index: 1, sceneIds: misplacedScenes.map((item) => item.id), plannedTotalSeconds: 40 }],
+      },
+    })).toThrow(/intro scene must appear exactly once as the first scene/);
+
+    const sixFeatureRelease = {
+      ...release,
+      features: Array.from({ length: 6 }, (_, index) => ({
+        id: `feature-${index}`,
+        title: `功能 ${index}`,
+        narration: `旁白 ${index}`,
+      })),
+    };
+    const sixFeatureScenes = [
+      scenes[0]!,
+      ...sixFeatureRelease.features.map((feature, index) => ({
+        ...scene(feature.id, `scene-${index}`),
+        plannedDurationSeconds: 16,
+      })),
+      scenes[2]!,
+    ];
+    expect(() => validateReleasePackageRelations({
+      release: sixFeatureRelease,
+      scenePlan: { releaseVersion: release.version, scenes: sixFeatureScenes },
+      manifest: {
+        format: "showcraft.mock-manifest/v1",
+        releaseVersion: release.version,
+        scenes: sixFeatureScenes,
+        volumes: [{ index: 1, sceneIds: sixFeatureScenes.map((item) => item.id), plannedTotalSeconds: 120 }],
+      },
+    })).toThrow(/must not exceed 90 seconds/);
   });
 
 });

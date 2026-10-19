@@ -23,9 +23,9 @@
 
 ## 4. 中文视频合成
 
-- [ ] 4.1 实现 Edge TTS `zh-CN-XiaoxiaoNeural` adapter 与中文时序输出，并验证中文文本生成可用音轨与字幕时序
-- [ ] 4.2 实现 feature 数量驱动的镜头时长与 90 秒系列拆分，并验证 1、3、6 个 feature 的 manifest 行为
-- [ ] 4.3 创建 Remotion composition 并消费 manifest，验证 v0.3.3 感知/IM 样本可预览或渲染 MP4
+- [x] 4.1 实现 Edge TTS `zh-CN-XiaoxiaoNeural` adapter 与中文时序输出，并验证中文文本生成可用音轨与字幕时序
+- [x] 4.2 实现 feature 数量驱动的镜头时长与 90 秒系列拆分，并验证 1、3、6 个 feature 的 manifest 行为
+- [x] 4.3 创建 Remotion composition 并消费 manifest，验证 v0.3.3 感知/IM 样本可预览或渲染 MP4
 
 ## 5. 本机审核与端到端验收
 

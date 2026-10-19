@@ -12,7 +12,41 @@ describe("runPipeline", () => {
     expect(store.currentStatus).toBe("completed");
     const files = store.collectFiles().map((file) => file.fileName);
     expect(files).toEqual(["release.json", "scene.json", "manifest.json", "run.json"]);
+    const manifest = JSON.parse(new TextDecoder().decode(
+      store.collectFiles().find((file) => file.fileName === "manifest.json")?.bytes,
+    ));
+    expect(manifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: ["scene-intro", "scene-mock-feature", "scene-outro"],
+      plannedTotalSeconds: 40,
+    }]);
   });
+
+  it.each([[1, [40]], [6, [76, 44]]] as const)(
+    "orchestrates %i features into the expected volumes",
+    async (featureCount, expectedTotals) => {
+      const ports = mockPorts();
+      ports.releaseSource = () => ({
+        version: "demo",
+        source: "fixture.md",
+        features: Array.from({ length: featureCount }, (_, index) => ({
+          id: `feature-${index}`,
+          title: `功能 ${index}`,
+          narration: `功能 ${index} 旁白`,
+        })),
+      });
+      const store = new RunStoreCore(`orch-duration-${featureCount}`);
+      await runPipeline(ports, store);
+      expect(store.currentStatus).toBe("completed");
+      const manifest = JSON.parse(new TextDecoder().decode(
+        store.collectFiles().find((file) => file.fileName === "manifest.json")?.bytes,
+      ));
+      expect(manifest.volumes.map((volume: { plannedTotalSeconds: number }) => volume.plannedTotalSeconds))
+        .toEqual(expectedTotals);
+      expect(manifest.volumes.flatMap((volume: { sceneIds: string[] }) => volume.sceneIds))
+        .toEqual(manifest.scenes.map((scene: { id: string }) => scene.id));
+    },
+  );
 
   it("records failure stage and keeps prior artifacts when the renderer throws", async () => {
     const ports = mockPorts();
@@ -33,6 +67,57 @@ describe("runPipeline", () => {
       new TextDecoder().decode(store.collectFiles().find((f) => f.fileName === "run.json")?.bytes),
     );
     expect(record.status).toBe("failed");
+  });
+
+  it("field-validates scene-plan output before relation validation or persistence", async () => {
+    const ports = mockPorts();
+    ports.scenePlanner = () => ({ scenes: null }) as never;
+    const store = new RunStoreCore("orch-invalid-scene-plan");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "scenePlan", reason: /releaseVersion|scenes/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
+  });
+
+  it("field-validates narration output before relation validation or persistence", async () => {
+    const ports = mockPorts();
+    ports.narration = () => ({ scenes: null }) as never;
+    const store = new RunStoreCore("orch-invalid-narration");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "narration", reason: /releaseVersion|scenes/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "run.json",
+    ]);
+  });
+
+  it("field-validates manifest output before relation validation or persistence", async () => {
+    const ports = mockPorts();
+    ports.renderer = () => ({ scenes: null }) as never;
+    const store = new RunStoreCore("orch-invalid-manifest");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "manifest", reason: /format|releaseVersion|scenes/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "run.json",
+    ]);
+  });
+
+  it("fails manifest relations without persisting the invalid manifest", async () => {
+    const ports = mockPorts();
+    ports.renderer = (release, scenePlan) => ({
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes: scenePlan.scenes,
+      volumes: [{
+        index: 1,
+        sceneIds: scenePlan.scenes.map((scene) => scene.id),
+        plannedTotalSeconds: 41,
+      }],
+    });
+    const store = new RunStoreCore("orch-invalid-manifest-relations");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "manifest", reason: /sum of its scene durations/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "run.json",
+    ]);
   });
 
   it("records failure at release stage when the source throws first", async () => {
@@ -58,6 +143,20 @@ describe("runPipeline", () => {
 
     expect(store.currentStatus).toBe("failed");
     expect(store.currentFailure?.stage).toBe("scenePlan");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
+  });
+
+  it("attributes reserved intro/outro feature ids to the scene-plan stage", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "demo",
+      source: "fixture.md",
+      features: [{ id: "intro", title: "冲突开场", narration: "冲突旁白" }],
+    });
+    const store = new RunStoreCore("orch-reserved-feature");
+    await runPipeline(ports, store);
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure).toMatchObject({ stage: "scenePlan", reason: /reserved feature id/ });
     expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
   });
 
@@ -466,5 +565,116 @@ describe("runPipeline", () => {
       "manifest.json",
       "run.json",
     ]);
+  });
+
+  it("records narration after the scene plan and before the manifest", async () => {
+    const ports = mockPorts();
+    ports.narration = (release, scenePlan) => ({
+      releaseVersion: release.version,
+      voice: "zh-CN-XiaoxiaoNeural",
+      scenes: scenePlan.scenes.map((scene) => ({
+        sceneId: scene.id,
+        featureId: scene.featureId,
+        audioFile: `narration-${scene.id}.mp3`,
+        audioDurationMs: 1_000,
+        voice: "zh-CN-XiaoxiaoNeural",
+        cues: [{ text: scene.narration, startMs: 0, endMs: 900 }],
+      })),
+    });
+    const store = new RunStoreCore("orch-narration");
+    await runPipeline(ports, store);
+
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "narration.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("attributes narration failures while preserving prior artifacts", async () => {
+    const ports = mockPorts();
+    ports.narration = () => {
+      throw new Error("tts unavailable");
+    };
+    const store = new RunStoreCore("orch-narration-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure).toMatchObject({ stage: "narration", reason: "tts unavailable" });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "run.json",
+    ]);
+  });
+
+  it("rejects narration that does not cover the planned scenes", async () => {
+    const ports = mockPorts();
+    ports.narration = (release) => ({
+      releaseVersion: release.version,
+      voice: "zh-CN-XiaoxiaoNeural",
+      scenes: [],
+    });
+    const store = new RunStoreCore("orch-narration-incomplete");
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure?.stage).toBe("narration");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "run.json",
+    ]);
+  });
+
+  it("records an optional composition after the manifest", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = ({ runId, manifest }) => ({
+      format: "showcraft.remotion/v1",
+      runId,
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    });
+    const store = new RunStoreCore("orch-composition");
+    await runPipeline(ports, store);
+    expect(store.currentStatus).toBe("completed");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "manifest.json", "composition.json", "run.json",
+    ]);
+  });
+
+  it("attributes composition failures and preserves the manifest", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = () => { throw new Error("renderer unavailable"); };
+    const store = new RunStoreCore("orch-composition-fail");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toEqual({ stage: "composition", reason: "renderer unavailable" });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "manifest.json", "run.json",
+    ]);
+  });
+
+  it("rejects composition provenance for a different run", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = ({ manifest }) => ({
+      format: "showcraft.remotion/v1",
+      runId: "wrong-run",
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    });
+    const store = new RunStoreCore("right-run");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "composition", reason: expect.stringMatching(/run id/) });
   });
 });

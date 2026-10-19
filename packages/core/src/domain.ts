@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+import {
+  FEATURE_MAX_SECONDS,
+  FEATURE_MIN_SECONDS,
+  INTRO_FEATURE_ID,
+  INTRO_OUTRO_MAX_SECONDS,
+  INTRO_OUTRO_MIN_SECONDS,
+  OUTRO_FEATURE_ID,
+  VOLUME_LIMIT_SECONDS,
+} from "./durationOrchestration.js";
+
 /**
  * Domain contracts for ShowCraft. Two layers:
  * - entity schemas validate a single object's local fields and enums;
@@ -35,7 +45,7 @@ export const reviewStatusSchema = z.enum(["pending_review", "approved", "changes
 
 export const evidenceKindSchema = z.enum(["commit", "diff", "file", "symbol", "entry_point"]);
 
-export const narrationSourceSchema = z.enum(["narration", "human_supplement", "fallback"]);
+export const narrationSourceSchema = z.enum(["narration", "human_supplement", "fallback", "generated"]);
 
 // ---------------------------------------------------------------------------
 // Release brief
@@ -322,20 +332,139 @@ export const sceneSchema = z
     narration: z.string().min(1, "scene narration must not be empty"),
     /** Where the narration text came from; human supplements stay auditable. */
     narrationSource: narrationSourceSchema,
-    /** Planned duration in seconds; duration orchestration lives in later stories. */
+    /** Planned duration in seconds; duration orchestration landed in Story 4.2. */
     plannedDurationSeconds: z.number().positive("scene duration must be positive"),
   })
-  .strict();
+  .strict()
+  .superRefine((scene, context) => {
+    const synthetic = scene.featureId === INTRO_FEATURE_ID || scene.featureId === OUTRO_FEATURE_ID;
+    if (synthetic && scene.narrationSource !== "generated") {
+      context.addIssue({
+        code: "custom",
+        path: ["narrationSource"],
+        message: "intro/outro scenes must use generated narration source",
+      });
+    }
+    if (!synthetic && scene.narrationSource === "generated") {
+      context.addIssue({
+        code: "custom",
+        path: ["narrationSource"],
+        message: "generated narration source is reserved for intro/outro scenes",
+      });
+    }
+  });
+
+function addDuplicateSceneIdIssues(
+  scenes: readonly Scene[],
+  context: z.RefinementCtx,
+): void {
+  const seen = new Set<string>();
+  scenes.forEach((scene, index) => {
+    if (seen.has(scene.id)) {
+      context.addIssue({
+        code: "custom",
+        path: ["scenes", index, "id"],
+        message: "duplicate scene id",
+      });
+    }
+    seen.add(scene.id);
+  });
+}
 
 export const scenePlanSchema = z
   .object({
     releaseVersion: z.string().min(1, "scene plan release version must not be empty"),
     scenes: z.array(sceneSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((plan, context) => addDuplicateSceneIdIssues(plan.scenes, context));
 
 export type Scene = z.infer<typeof sceneSchema>;
 export type ScenePlan = z.infer<typeof scenePlanSchema>;
+
+// ---------------------------------------------------------------------------
+// Narration audio and subtitle timing
+// ---------------------------------------------------------------------------
+
+export const subtitleCueSchema = z
+  .object({
+    text: z.string().min(1, "subtitle text must not be empty"),
+    startMs: z.number().int().min(0, "subtitle start must be >= 0"),
+    endMs: z.number().int().positive("subtitle end must be positive"),
+  })
+  .strict()
+  .refine((cue) => cue.endMs > cue.startMs, {
+    message: "subtitle end must be after start",
+    path: ["endMs"],
+  });
+
+export const narratedSceneSchema = z
+  .object({
+    sceneId: sceneIdSchema,
+    featureId: featureIdSchema,
+    audioFile: z
+      .string()
+      .min(1, "audio file must not be empty")
+      .regex(/^[A-Za-z0-9._-]+$/, "audio file must be a file name")
+      .refine((file) => file !== "." && file !== "..", "audio file must not be a directory"),
+    audioDurationMs: z.number().int().positive("audio duration must be positive"),
+    voice: z.string().min(1, "voice must not be empty"),
+    cues: z.array(subtitleCueSchema).min(1, "subtitle cues must not be empty"),
+  })
+  .strict()
+  .superRefine((scene, context) => {
+    for (let index = 1; index < scene.cues.length; index += 1) {
+      if (scene.cues[index]!.startMs < scene.cues[index - 1]!.startMs) {
+        context.addIssue({
+          code: "custom",
+          path: ["cues", index, "startMs"],
+          message: "subtitle cue starts must be monotonically non-decreasing",
+        });
+      }
+    }
+    const lastCueEnd = Math.max(...scene.cues.map((cue) => cue.endMs));
+    if (lastCueEnd > scene.audioDurationMs * 1.05) {
+      context.addIssue({
+        code: "custom",
+        path: ["cues"],
+        message: "subtitle cues must end within 105% of the audio duration",
+      });
+    }
+  });
+
+export const narrationArtifactSchema = z
+  .object({
+    releaseVersion: z.string().min(1, "narration release version must not be empty"),
+    voice: z.string().min(1, "narration voice must not be empty"),
+    scenes: z.array(narratedSceneSchema).min(1, "narrated scenes must not be empty"),
+  })
+  .strict()
+  .superRefine((artifact, context) => {
+    const sceneIds = new Set<string>();
+    const audioFiles = new Set<string>();
+    artifact.scenes.forEach((scene, index) => {
+      if (scene.voice !== artifact.voice) {
+        context.addIssue({
+          code: "custom",
+          path: ["scenes", index, "voice"],
+          message: "scene voice must match narration voice",
+        });
+      }
+      if (sceneIds.has(scene.sceneId)) {
+        context.addIssue({ code: "custom", path: ["scenes", index, "sceneId"], message: "duplicate narrated scene id" });
+      }
+      const normalizedFile = scene.audioFile.toLowerCase();
+      if (audioFiles.has(normalizedFile)) {
+        context.addIssue({ code: "custom", path: ["scenes", index, "audioFile"], message: "duplicate narration audio file" });
+      }
+      sceneIds.add(scene.sceneId);
+      audioFiles.add(normalizedFile);
+    });
+  });
+
+export type SubtitleCue = z.infer<typeof subtitleCueSchema>;
+export type NarratedScene = z.infer<typeof narratedSceneSchema>;
+export type NarrationArtifact = z.infer<typeof narrationArtifactSchema>;
 
 // ---------------------------------------------------------------------------
 // Render manifest
@@ -343,15 +472,94 @@ export type ScenePlan = z.infer<typeof scenePlanSchema>;
 
 export const renderFormatSchema = z.enum(["showcraft.mock-manifest/v1"]);
 
+export const volumeSchema = z
+  .object({
+    index: z.number().int().min(1, "volume index must be >= 1"),
+    sceneIds: z.array(sceneIdSchema).min(1, "volume scene ids must not be empty"),
+    plannedTotalSeconds: z.number().positive("volume planned duration must be positive"),
+  })
+  .strict();
+
 export const renderManifestSchema = z
   .object({
     format: renderFormatSchema,
     releaseVersion: z.string().min(1, "manifest release version must not be empty"),
     scenes: z.array(sceneSchema),
+    volumes: z.array(volumeSchema).optional(),
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    addDuplicateSceneIdIssues(manifest.scenes, context);
+    if (!manifest.volumes) return;
+    manifest.volumes.forEach((volume, index) => {
+      if (volume.index !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["volumes", index, "index"],
+          message: "volume indexes must be sequential starting at 1",
+        });
+      }
+    });
+    const projectedIds = manifest.volumes.flatMap((volume) => volume.sceneIds);
+    const sceneIds = manifest.scenes.map((scene) => scene.id);
+    if (JSON.stringify(projectedIds) !== JSON.stringify(sceneIds)) {
+      context.addIssue({
+        code: "custom",
+        path: ["volumes"],
+        message: "volume scene ids must match manifest scenes exactly and in order",
+      });
+    }
+  });
+
+export type RenderManifest = z.infer<typeof renderManifestSchema>;
+export type Volume = z.infer<typeof volumeSchema>;
+
+// ---------------------------------------------------------------------------
+// Remotion composition result
+// ---------------------------------------------------------------------------
+
+export const compositionVolumeSchema = z
+  .object({
+    index: z.number().int().min(1, "composition volume index must be >= 1"),
+    mp4File: z
+      .string()
+      .regex(/^video-volume-[1-9][0-9]*\.mp4$/, "composition MP4 must be a volume file name"),
+    durationSeconds: z.number().positive("composition volume duration must be positive"),
+    sceneIds: z.array(sceneIdSchema).min(1, "composition scene ids must not be empty"),
+    audioFiles: z.array(z.string().regex(/^[A-Za-z0-9._-]+$/)).optional(),
   })
   .strict();
 
-export type RenderManifest = z.infer<typeof renderManifestSchema>;
+export const compositionSchema = z
+  .object({
+    format: z.literal("showcraft.remotion/v1"),
+    runId: z.string().min(1, "composition run id must not be empty"),
+    volumes: z.array(compositionVolumeSchema).min(1, "composition volumes must not be empty"),
+  })
+  .strict()
+  .superRefine((composition, context) => {
+    const files = new Set<string>();
+    composition.volumes.forEach((volume, index) => {
+      if (volume.index !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["volumes", index, "index"],
+          message: "composition volume indexes must be sequential starting at 1",
+        });
+      }
+      const expectedFile = `video-volume-${volume.index}.mp4`;
+      if (volume.mp4File !== expectedFile) {
+        context.addIssue({ code: "custom", path: ["volumes", index, "mp4File"], message: `must be ${expectedFile}` });
+      }
+      if (files.has(volume.mp4File)) {
+        context.addIssue({ code: "custom", path: ["volumes", index, "mp4File"], message: "duplicate composition MP4 file" });
+      }
+      files.add(volume.mp4File);
+    });
+  });
+
+export type CompositionVolume = z.infer<typeof compositionVolumeSchema>;
+export type Composition = z.infer<typeof compositionSchema>;
 
 // ---------------------------------------------------------------------------
 // Run record and review decision (independent statuses by design)
@@ -399,7 +607,9 @@ export const releasePackageSchema = z
     gate: gateResultSchema.optional(),
     actions: demoActionsSchema.optional(),
     scenePlan: scenePlanSchema.optional(),
+    narration: narrationArtifactSchema.optional(),
     manifest: renderManifestSchema.optional(),
+    composition: compositionSchema.optional(),
     run: runRecordSchema.optional(),
     review: reviewDecisionSchema.optional(),
   })
@@ -430,13 +640,26 @@ export function formatIssues(issues: readonly z.ZodIssue[]): Array<{ path: strin
   }));
 }
 
-function collectFeatureIds(release: ReleaseBrief): Set<string> {
-  return new Set(release.features.map((feature) => feature.id));
+function collectFeatureIds(release: ReleaseBrief, allowSynthetic = false): Set<string> {
+  const ids = new Set(release.features.map((feature) => feature.id));
+  if (allowSynthetic) {
+    ids.add(INTRO_FEATURE_ID);
+    ids.add(OUTRO_FEATURE_ID);
+  }
+  return ids;
 }
 
 function assertUniqueFeatureIds(release: ReleaseBrief): void {
   const seen = new Set<string>();
   for (const feature of release.features) {
+    if (feature.id === INTRO_FEATURE_ID || feature.id === OUTRO_FEATURE_ID) {
+      throw new DomainValidationError([
+        {
+          path: `release.features[id=${feature.id}]`,
+          message: `reserved feature id "${feature.id}" conflicts with opening/closing scenes; rename the release section`,
+        },
+      ]);
+    }
     if (seen.has(feature.id)) {
       throw new DomainValidationError([
         {
@@ -449,8 +672,13 @@ function assertUniqueFeatureIds(release: ReleaseBrief): void {
   }
 }
 
-function assertReferences(release: ReleaseBrief, featureId: string, path: string): void {
-  if (!collectFeatureIds(release).has(featureId)) {
+function assertReferences(
+  release: ReleaseBrief,
+  featureId: string,
+  path: string,
+  allowSynthetic = false,
+): void {
+  if (!collectFeatureIds(release, allowSynthetic).has(featureId)) {
     throw new DomainValidationError([
       {
         path,
@@ -481,10 +709,13 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
     assertReferences(release, action.featureId, `actions.actions[featureId=${action.featureId}]`);
   }
   for (const scene of packageValue.scenePlan?.scenes ?? []) {
-    assertReferences(release, scene.featureId, `scenePlan.scenes[id=${scene.id}].featureId`);
+    assertReferences(release, scene.featureId, `scenePlan.scenes[id=${scene.id}].featureId`, true);
+  }
+  for (const scene of packageValue.narration?.scenes ?? []) {
+    assertReferences(release, scene.featureId, `narration.scenes[sceneId=${scene.sceneId}].featureId`, true);
   }
   for (const scene of packageValue.manifest?.scenes ?? []) {
-    assertReferences(release, scene.featureId, `manifest.scenes[id=${scene.id}].featureId`);
+    assertReferences(release, scene.featureId, `manifest.scenes[id=${scene.id}].featureId`, true);
   }
 
   const version = release.version;
@@ -588,6 +819,33 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
       },
     ]);
   }
+  if (packageValue.narration && packageValue.narration.releaseVersion !== version) {
+    throw new DomainValidationError([
+      {
+        path: "narration.releaseVersion",
+        message: `does not match release version "${version}"`,
+      },
+    ]);
+  }
+  if (packageValue.scenePlan && packageValue.narration) {
+    const plannedScenes = new Map(packageValue.scenePlan.scenes.map((scene) => [scene.id, scene]));
+    if (packageValue.narration.scenes.length !== plannedScenes.size) {
+      throw new DomainValidationError([
+        { path: "narration.scenes", message: "must contain exactly one entry per planned scene" },
+      ]);
+    }
+    for (const narrated of packageValue.narration.scenes) {
+      const planned = plannedScenes.get(narrated.sceneId);
+      if (!planned || planned.featureId !== narrated.featureId) {
+        throw new DomainValidationError([
+          {
+            path: `narration.scenes[sceneId=${narrated.sceneId}]`,
+            message: "does not match a planned scene and feature",
+          },
+        ]);
+      }
+    }
+  }
   if (packageValue.manifest && packageValue.manifest.releaseVersion !== version) {
     throw new DomainValidationError([
       {
@@ -595,6 +853,120 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
         message: `does not match release version "${version}"`,
       },
     ]);
+  }
+
+  if (packageValue.composition) {
+    if (!packageValue.manifest?.volumes) {
+      throw new DomainValidationError([
+        { path: "composition", message: "composition requires a manifest with volumes" },
+      ]);
+    }
+    const expected = packageValue.manifest.volumes;
+    if (packageValue.composition.volumes.length !== expected.length) {
+      throw new DomainValidationError([
+        { path: "composition.volumes", message: "must contain exactly one entry per manifest volume" },
+      ]);
+    }
+    packageValue.composition.volumes.forEach((volume, index) => {
+      const manifestVolume = expected[index];
+      if (!manifestVolume ||
+        volume.index !== manifestVolume.index ||
+        volume.durationSeconds !== manifestVolume.plannedTotalSeconds ||
+        JSON.stringify(volume.sceneIds) !== JSON.stringify(manifestVolume.sceneIds)) {
+        throw new DomainValidationError([{
+          path: `composition.volumes[index=${volume.index}]`,
+          message: "must match the corresponding manifest volume index, duration, and scenes",
+        }]);
+      }
+      const narratedByScene = new Map(packageValue.narration?.scenes.map((scene) => [scene.sceneId, scene.audioFile]) ?? []);
+      const expectedAudioFiles = manifestVolume.sceneIds.flatMap((sceneId) => {
+        const audioFile = narratedByScene.get(sceneId);
+        return audioFile ? [audioFile] : [];
+      });
+      if (JSON.stringify(volume.audioFiles ?? []) !== JSON.stringify(expectedAudioFiles)) {
+        throw new DomainValidationError([{
+          path: `composition.volumes[index=${volume.index}].audioFiles`,
+          message: "must exactly match narration audio files for the manifest volume",
+        }]);
+      }
+    });
+  }
+
+  if (packageValue.scenePlan) {
+    const { scenes } = packageValue.scenePlan;
+    const introIndexes = scenes.flatMap((scene, index) => scene.featureId === INTRO_FEATURE_ID ? [index] : []);
+    const outroIndexes = scenes.flatMap((scene, index) => scene.featureId === OUTRO_FEATURE_ID ? [index] : []);
+    if (introIndexes.length > 0 && (introIndexes.length !== 1 || introIndexes[0] !== 0)) {
+      throw new DomainValidationError([
+        { path: "scenePlan.scenes", message: "intro scene must appear exactly once as the first scene" },
+      ]);
+    }
+    if (outroIndexes.length > 0 && (outroIndexes.length !== 1 || outroIndexes[0] !== scenes.length - 1)) {
+      throw new DomainValidationError([
+        { path: "scenePlan.scenes", message: "outro scene must appear exactly once as the last scene" },
+      ]);
+    }
+  }
+
+  if (packageValue.scenePlan && packageValue.manifest?.volumes) {
+    const plannedScenes = packageValue.scenePlan.scenes;
+    const manifestScenes = packageValue.manifest.scenes;
+    if (plannedScenes[0]?.featureId !== INTRO_FEATURE_ID || plannedScenes.at(-1)?.featureId !== OUTRO_FEATURE_ID) {
+      throw new DomainValidationError([
+        { path: "scenePlan.scenes", message: "orchestrated scene plans require intro first and outro last" },
+      ]);
+    }
+    if (JSON.stringify(manifestScenes) !== JSON.stringify(plannedScenes)) {
+      throw new DomainValidationError([
+        { path: "manifest.scenes", message: "must match the scene plan exactly" },
+      ]);
+    }
+    const sceneById = new Map(manifestScenes.map((scene) => [scene.id, scene]));
+    for (const volume of packageValue.manifest.volumes) {
+      const expectedDuration = volume.sceneIds.reduce(
+        (total, sceneId) => total + (sceneById.get(sceneId)?.plannedDurationSeconds ?? 0),
+        0,
+      );
+      if (volume.plannedTotalSeconds !== expectedDuration) {
+        throw new DomainValidationError([
+          {
+            path: `manifest.volumes[index=${volume.index}].plannedTotalSeconds`,
+            message: `must equal the sum of its scene durations (${expectedDuration})`,
+          },
+        ]);
+      }
+      if (volume.plannedTotalSeconds > VOLUME_LIMIT_SECONDS) {
+        throw new DomainValidationError([
+          { path: `manifest.volumes[index=${volume.index}]`, message: `must not exceed ${VOLUME_LIMIT_SECONDS} seconds` },
+        ]);
+      }
+    }
+    for (const scene of plannedScenes) {
+      const [min, max] = scene.featureId === INTRO_FEATURE_ID || scene.featureId === OUTRO_FEATURE_ID
+        ? [INTRO_OUTRO_MIN_SECONDS, INTRO_OUTRO_MAX_SECONDS]
+        : [FEATURE_MIN_SECONDS, FEATURE_MAX_SECONDS];
+      if (scene.plannedDurationSeconds < min || scene.plannedDurationSeconds > max) {
+        throw new DomainValidationError([
+          {
+            path: `scenePlan.scenes[id=${scene.id}].plannedDurationSeconds`,
+            message: `must be within ${min}-${max} seconds`,
+          },
+        ]);
+      }
+    }
+    if (plannedScenes.some((scene) => scene.featureId === INTRO_FEATURE_ID) &&
+      packageValue.manifest.volumes[0]?.sceneIds[0] !== plannedScenes[0]?.id) {
+      throw new DomainValidationError([
+        { path: "manifest.volumes", message: "intro scene must be first in the first volume" },
+      ]);
+    }
+    const lastVolume = packageValue.manifest.volumes.at(-1);
+    if (plannedScenes.some((scene) => scene.featureId === OUTRO_FEATURE_ID) &&
+      lastVolume?.sceneIds.at(-1) !== plannedScenes.at(-1)?.id) {
+      throw new DomainValidationError([
+        { path: "manifest.volumes", message: "outro scene must be last in the final volume" },
+      ]);
+    }
   }
 
   // Gate ↔ scenePlan consistency: the gate result is the authority on which

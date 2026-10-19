@@ -94,6 +94,8 @@ describe("runDemo with a self-contained desktop release fixture", () => {
     const result = await runDemo({ outputRoot: root, runId: "fixture-gate", source: fixture.changelogPath });
     const run = JSON.parse(await readFile(join(result.runDirectory, "run.json"), "utf8"));
     const gate = JSON.parse(await readFile(join(result.runDirectory, "gate.json"), "utf8"));
+    const scenePlan = JSON.parse(await readFile(join(result.runDirectory, "scene.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(join(result.runDirectory, "manifest.json"), "utf8"));
 
     expect(run.artifacts).toEqual([
       "release.json",
@@ -109,6 +111,14 @@ describe("runDemo with a self-contained desktop release fixture", () => {
       automatable: true,
       confidence: 1,
     }));
+    expect(scenePlan.scenes.map((scene: { featureId: string }) => scene.featureId)).toEqual([
+      "intro", "section-1-im", "outro",
+    ]);
+    expect(manifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: scenePlan.scenes.map((scene: { id: string }) => scene.id),
+      plannedTotalSeconds: 40,
+    }]);
   });
 
   it("keeps fixture gate and scene bytes stable across repeated source runs", async () => {
@@ -119,7 +129,7 @@ describe("runDemo with a self-contained desktop release fixture", () => {
 
     const first = await runDemo({ outputRoot: firstRoot, runId: "fixture-gate", source: fixture.changelogPath });
     const second = await runDemo({ outputRoot: secondRoot, runId: "fixture-gate", source: fixture.changelogPath });
-    for (const file of ["gate.json", "scene.json"]) {
+    for (const file of ["gate.json", "scene.json", "manifest.json"]) {
       expect((await readFile(join(first.runDirectory, file)))
         .equals(await readFile(join(second.runDirectory, file))), file).toBe(true);
     }
@@ -344,7 +354,7 @@ describe("runDemo with --source", () => {
 
     const first = await runDemo({ outputRoot: firstRoot, runId: "gate-bytes", source: sourcePath });
     const second = await runDemo({ outputRoot: secondRoot, runId: "gate-bytes", source: sourcePath });
-    for (const fileName of ["gate.json", "scene.json"]) {
+    for (const fileName of ["gate.json", "scene.json", "manifest.json"]) {
       const a = await readFile(join(first.runDirectory, fileName));
       const b = await readFile(join(second.runDirectory, fileName));
       expect(Buffer.from(a).equals(Buffer.from(b)), fileName).toBe(true);
