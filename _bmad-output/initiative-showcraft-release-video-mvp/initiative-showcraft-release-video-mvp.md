@@ -34,11 +34,12 @@ risk: high
 
 ## Done when
 
-1. StartUpOS `v0.3.3` 的感知与 IM 路由能从 Changelog 和代码证据生成可审核视频。
-2. 每个自动演示镜头都能回链发布说明与 Git 代码证据，低置信度候选不会被执行。
-3. 视频含中文配音、字幕，并符合动态时长与拆分规则。
-4. 本机 HTTP 预览可用且不监听局域网；审核决定可持久化。
-5. 功能事实、录屏状态、音画同步和时长四项审核均通过后，run 才能完成业务交付。
+1. 首轮验证目标 1：StartUpOS `v0.3.3` 的感知与 IM 路由能从 Changelog 和代码证据生成可审核视频。
+2. 首轮验证目标 2：DeepMatch 网站可由 ego-browser 完成真实图纸上传与供应商匹配，并产出有效录屏素材及符合既有 actions/media 语义的 run 记录；失败不产生伪成功。
+3. 每个自动演示镜头都能回链发布说明与 Git 代码证据，低置信度候选不会被执行。
+4. 视频含中文配音、字幕，并符合动态时长与拆分规则。
+5. 本机 HTTP 预览可用且不监听局域网；审核决定可持久化。
+6. 功能事实、录屏状态、音画同步和时长四项审核均通过后，run 才能完成业务交付。
 
 ## Boundaries
 
@@ -59,5 +60,5 @@ risk: high
 
 - Decision: 采用 OpenSpec 管理 SDD 规格、仓库 Markdown 管理 Initiative/Epic/Story（用户决定，2026-09-28）。
 - Decision: 首个验收样本为 StartUpOS Desktop v0.3.3 的感知与 IM 路由（用户决定，2026-09-28）。
+- Decision: 首轮验收包含两个并列目标：目标 1 为 StartUpOS v0.3.3「感知与 IM 路由」可审核视频；目标 2 为 DeepMatch 网站「上传图纸，匹配对应产品供应商」真实操作录屏及 run 记录。目标 2 排在既有 story 序列末位 12 之后，不替换目标 1，也不纳入 epic 4 的配音、字幕、Remotion 与 90 秒拆分范围（用户决定，2026-10-15；2026-10-19 进入 epic 5 验证阶段）。
 - Unknown: StartUpOS 的稳定启动/认证与 UI 就绪条件由 desktop capture epic 的 tracer story 验证。
-
