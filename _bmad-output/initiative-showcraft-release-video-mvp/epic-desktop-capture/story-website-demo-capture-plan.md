@@ -3,7 +3,7 @@ title: 'DeepMatch 网站上传图纸匹配供应商功能录屏（首轮验证�
 type: 'feature'
 ticket: '10'
 created: '2026-10-19'
-status: 'draft'
+status: 'ready-for-dev'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -74,15 +74,16 @@ context:
 
 ## Implementation Notes
 
-- 本文件仅为待用户批准的实施计划；本轮不改 ShowCraft 产品代码、website 仓库或 OpenSpec。实施完成后的真实 run 路径、两轮 `actions.json` 比对结果及全量测试结果在此回填。
+- 本计划已于 2026-10-19 获用户批准并进入 ready-for-dev；本轮不改 ShowCraft 产品代码、website 仓库或 OpenSpec。实施完成后的真实 run 路径、两轮 `actions.json` 比对结果及全量测试结果在此回填。
 
 ## Plan Change Log
 
 - 2026-10-19：基于 epic 4 收口基线与保留的规划期实测证据创建首版计划；录屏方式定案为系统级 `screencapture`，契约承载定案为独立采集脚本 + 既有 run/actions/media 语义，不新增 ShowCraft CLI 面。
+- 2026-10-19：用户批准计划；状态更新为 `ready-for-dev`，`<frozen-after-approval>` 区块自此锁定，后续范围或契约变化须重新评审。
 
 ## Review Triage Log
 
-- 待用户批准；批准后 `<frozen-after-approval>` 区块锁定，任何范围或契约变化须重新评审。
+- 2026-10-19 用户已批准；`<frozen-after-approval>` 区块已锁定，任何范围或契约变化须重新评审。
 
 ## Design Notes
 
