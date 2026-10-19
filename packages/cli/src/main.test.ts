@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, it } from "vitest";
-import { NarrationError } from "@showcraft/core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NarrationError, type NarrationArtifact } from "@showcraft/core";
 
 import { parseDemoArgs, runDemo } from "./main.js";
 
@@ -114,6 +114,89 @@ describe("runDemo", () => {
     ]);
   });
 
+  it("assembles an opt-in composition port and records its run mapping", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-main-render-"));
+    temporaryPaths.push(root);
+    const result = await runDemo({
+      outputRoot: root,
+      runId: "render-run",
+      render: true,
+      createComposition: () => async ({ runId, manifest }) => ({
+        format: "showcraft.remotion/v1",
+        runId,
+        volumes: manifest.volumes!.map((volume) => ({
+          index: volume.index,
+          mp4File: `video-volume-${volume.index}.mp4`,
+          durationSeconds: volume.plannedTotalSeconds,
+          sceneIds: volume.sceneIds,
+        })),
+      }),
+    });
+    const composition = JSON.parse(await readFile(join(result.runDirectory, "composition.json"), "utf8"));
+    expect(composition).toMatchObject({ format: "showcraft.remotion/v1", runId: "render-run" });
+    const run = JSON.parse(await readFile(join(result.runDirectory, "run.json"), "utf8"));
+    expect(run.artifacts.at(-1)).toBe("composition.json");
+  });
+
+  it("hands generated narration unchanged to composition and persists audio mappings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-main-audio-render-"));
+    temporaryPaths.push(root);
+    let generated: NarrationArtifact | undefined;
+    const result = await runDemo({
+      outputRoot: root,
+      runId: "audio-render-run",
+      tts: true,
+      render: true,
+      createNarration: () => (release, scenePlan) => {
+        generated = {
+          releaseVersion: release.version,
+          voice: "v",
+          scenes: scenePlan.scenes.map((scene) => ({
+            sceneId: scene.id,
+            featureId: scene.featureId,
+            audioFile: `narration-${scene.id}.mp3`,
+            audioDurationMs: 100,
+            voice: "v",
+            cues: [{ text: "x", startMs: 0, endMs: 90 }],
+          })),
+        };
+        return generated;
+      },
+      createComposition: () => ({ runId, manifest, narration }) => {
+        expect(narration).toEqual(generated);
+        return {
+          format: "showcraft.remotion/v1",
+          runId,
+          volumes: manifest.volumes!.map((volume) => ({
+            index: volume.index,
+            mp4File: `video-volume-${volume.index}.mp4`,
+            durationSeconds: volume.plannedTotalSeconds,
+            sceneIds: volume.sceneIds,
+            audioFiles: volume.sceneIds.map((sceneId) => narration!.scenes.find((scene) => scene.sceneId === sceneId)!.audioFile),
+          })),
+        };
+      },
+    });
+    const composition = JSON.parse(await readFile(join(result.runDirectory, "composition.json"), "utf8"));
+    expect(composition.volumes[0].audioFiles).toEqual(generated!.scenes.map((scene) => scene.audioFile));
+  });
+
+  it("warns that desktop media is not composited with --render", async () => {
+    const root = await mkdtemp(join(tmpdir(), "showcraft-main-desktop-render-"));
+    temporaryPaths.push(root);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(runDemo({
+      outputRoot: root,
+      runId: "desktop-render-warning",
+      source: join(root, "unused-release.md"),
+      desktopRoot: join(root, "missing-desktop"),
+      render: true,
+      voice: "invalid-without-tts",
+    })).rejects.toThrow(/--voice requires --tts/);
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/text cards only/));
+    warning.mockRestore();
+  });
+
   it("rejects a programmatic voice override when TTS is disabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "showcraft-cli-voice-"));
     temporaryPaths.push(root);
@@ -169,6 +252,11 @@ describe("parseDemoArgs", () => {
       /--voice requires --tts/,
     );
     expect(() => parseDemoArgs(["--tts", "--voice", "--source", "release.md"])).toThrow(/Usage:/);
+  });
+
+  it("accepts --render alone and together with --tts", () => {
+    expect(parseDemoArgs(["--render"])).toEqual({ render: true });
+    expect(parseDemoArgs(["--tts", "--render"])).toEqual({ tts: true, render: true });
   });
 
   it("rejects programmatic desktop runs without a source before creating output", async () => {

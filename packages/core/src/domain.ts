@@ -515,6 +515,53 @@ export type RenderManifest = z.infer<typeof renderManifestSchema>;
 export type Volume = z.infer<typeof volumeSchema>;
 
 // ---------------------------------------------------------------------------
+// Remotion composition result
+// ---------------------------------------------------------------------------
+
+export const compositionVolumeSchema = z
+  .object({
+    index: z.number().int().min(1, "composition volume index must be >= 1"),
+    mp4File: z
+      .string()
+      .regex(/^video-volume-[1-9][0-9]*\.mp4$/, "composition MP4 must be a volume file name"),
+    durationSeconds: z.number().positive("composition volume duration must be positive"),
+    sceneIds: z.array(sceneIdSchema).min(1, "composition scene ids must not be empty"),
+    audioFiles: z.array(z.string().regex(/^[A-Za-z0-9._-]+$/)).optional(),
+  })
+  .strict();
+
+export const compositionSchema = z
+  .object({
+    format: z.literal("showcraft.remotion/v1"),
+    runId: z.string().min(1, "composition run id must not be empty"),
+    volumes: z.array(compositionVolumeSchema).min(1, "composition volumes must not be empty"),
+  })
+  .strict()
+  .superRefine((composition, context) => {
+    const files = new Set<string>();
+    composition.volumes.forEach((volume, index) => {
+      if (volume.index !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["volumes", index, "index"],
+          message: "composition volume indexes must be sequential starting at 1",
+        });
+      }
+      const expectedFile = `video-volume-${volume.index}.mp4`;
+      if (volume.mp4File !== expectedFile) {
+        context.addIssue({ code: "custom", path: ["volumes", index, "mp4File"], message: `must be ${expectedFile}` });
+      }
+      if (files.has(volume.mp4File)) {
+        context.addIssue({ code: "custom", path: ["volumes", index, "mp4File"], message: "duplicate composition MP4 file" });
+      }
+      files.add(volume.mp4File);
+    });
+  });
+
+export type CompositionVolume = z.infer<typeof compositionVolumeSchema>;
+export type Composition = z.infer<typeof compositionSchema>;
+
+// ---------------------------------------------------------------------------
 // Run record and review decision (independent statuses by design)
 // ---------------------------------------------------------------------------
 
@@ -562,6 +609,7 @@ export const releasePackageSchema = z
     scenePlan: scenePlanSchema.optional(),
     narration: narrationArtifactSchema.optional(),
     manifest: renderManifestSchema.optional(),
+    composition: compositionSchema.optional(),
     run: runRecordSchema.optional(),
     review: reviewDecisionSchema.optional(),
   })
@@ -805,6 +853,43 @@ export function validateReleasePackageRelations(packageValue: ReleasePackage): v
         message: `does not match release version "${version}"`,
       },
     ]);
+  }
+
+  if (packageValue.composition) {
+    if (!packageValue.manifest?.volumes) {
+      throw new DomainValidationError([
+        { path: "composition", message: "composition requires a manifest with volumes" },
+      ]);
+    }
+    const expected = packageValue.manifest.volumes;
+    if (packageValue.composition.volumes.length !== expected.length) {
+      throw new DomainValidationError([
+        { path: "composition.volumes", message: "must contain exactly one entry per manifest volume" },
+      ]);
+    }
+    packageValue.composition.volumes.forEach((volume, index) => {
+      const manifestVolume = expected[index];
+      if (!manifestVolume ||
+        volume.index !== manifestVolume.index ||
+        volume.durationSeconds !== manifestVolume.plannedTotalSeconds ||
+        JSON.stringify(volume.sceneIds) !== JSON.stringify(manifestVolume.sceneIds)) {
+        throw new DomainValidationError([{
+          path: `composition.volumes[index=${volume.index}]`,
+          message: "must match the corresponding manifest volume index, duration, and scenes",
+        }]);
+      }
+      const narratedByScene = new Map(packageValue.narration?.scenes.map((scene) => [scene.sceneId, scene.audioFile]) ?? []);
+      const expectedAudioFiles = manifestVolume.sceneIds.flatMap((sceneId) => {
+        const audioFile = narratedByScene.get(sceneId);
+        return audioFile ? [audioFile] : [];
+      });
+      if (JSON.stringify(volume.audioFiles ?? []) !== JSON.stringify(expectedAudioFiles)) {
+        throw new DomainValidationError([{
+          path: `composition.volumes[index=${volume.index}].audioFiles`,
+          message: "must exactly match narration audio files for the manifest volume",
+        }]);
+      }
+    });
   }
 
   if (packageValue.scenePlan) {

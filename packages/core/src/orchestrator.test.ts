@@ -626,4 +626,55 @@ describe("runPipeline", () => {
       "run.json",
     ]);
   });
+
+  it("records an optional composition after the manifest", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = ({ runId, manifest }) => ({
+      format: "showcraft.remotion/v1",
+      runId,
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    });
+    const store = new RunStoreCore("orch-composition");
+    await runPipeline(ports, store);
+    expect(store.currentStatus).toBe("completed");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "manifest.json", "composition.json", "run.json",
+    ]);
+  });
+
+  it("attributes composition failures and preserves the manifest", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = () => { throw new Error("renderer unavailable"); };
+    const store = new RunStoreCore("orch-composition-fail");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toEqual({ stage: "composition", reason: "renderer unavailable" });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "manifest.json", "run.json",
+    ]);
+  });
+
+  it("rejects composition provenance for a different run", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = ({ manifest }) => ({
+      format: "showcraft.remotion/v1",
+      runId: "wrong-run",
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    });
+    const store = new RunStoreCore("right-run");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "composition", reason: expect.stringMatching(/run id/) });
+  });
 });

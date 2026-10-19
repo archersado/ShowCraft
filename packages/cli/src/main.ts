@@ -21,6 +21,7 @@ import {
   validateLocalSource,
   isSecretPath,
   type CodeEvidencePort,
+  type CompositionPort,
   type ConfidenceGatePort,
   type EvidenceResult,
   type NarrationPort,
@@ -31,6 +32,7 @@ import { createRunDirectory, persistRunEvents } from "./runStore.js";
 import { collectCommits, collectDiffSample, discoverGitRepo, resolveTagRange } from "./gitEvidence.js";
 import { createStartUpOSDemoActions } from "./desktopActions.js";
 import { createEdgeTtsNarration } from "./edgeTtsNarration.js";
+import { createRemotionRenderer } from "./remotionRender.js";
 
 export type DemoOptions = {
   outputRoot?: string;
@@ -39,8 +41,10 @@ export type DemoOptions = {
   source?: string;
   desktopRoot?: string;
   tts?: boolean;
+  render?: boolean;
   voice?: string;
   createNarration?: (runDirectory: string, voice?: string) => NarrationPort;
+  createComposition?: (runDirectory: string) => CompositionPort;
 };
 
 export type DemoResult = {
@@ -51,6 +55,9 @@ export type DemoResult = {
 export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
   if (options.desktopRoot && !options.source) {
     throw new Error("--desktop requires --source");
+  }
+  if (options.desktopRoot && options.render) {
+    console.warn("--desktop + --render currently renders text cards only; recorded desktop media is not composited");
   }
   if (options.voice && !options.tts) {
     throw new Error("--voice requires --tts");
@@ -88,6 +95,9 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     ? (options.createNarration?.(runDirectory, options.voice) ??
       createEdgeTtsNarration({ runDirectory, voice: options.voice }))
     : undefined;
+  const composition = options.render
+    ? (options.createComposition?.(runDirectory) ?? createRemotionRenderer())
+    : undefined;
   // CLI assembles the adapters; core only sees the ports.
   await runPipeline(
     {
@@ -98,6 +108,7 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       ...(confidenceGate ? { confidenceGate } : {}),
       ...(desktopDemo ? { desktopDemo } : {}),
       ...(narration ? { narration } : {}),
+      ...(composition ? { composition, runDirectory } : {}),
     },
     store,
   );
@@ -243,10 +254,10 @@ const emptyEvidencePort: CodeEvidencePort = (release) => emptyEvidence(release);
 
 export function parseDemoArgs(
   args: readonly string[],
-): Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot" | "tts" | "voice"> {
+): Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot" | "tts" | "voice" | "render"> {
   const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
 
-  const parsed: Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot" | "tts" | "voice"> = {};
+  const parsed: Pick<DemoOptions, "outputRoot" | "source" | "desktopRoot" | "tts" | "voice" | "render"> = {};
   for (let index = 0; index < normalizedArgs.length;) {
     const flag = normalizedArgs[index];
     const value = normalizedArgs[index + 1];
@@ -262,11 +273,14 @@ export function parseDemoArgs(
     } else if (flag === "--tts") {
       parsed.tts = true;
       index += 1;
+    } else if (flag === "--render") {
+      parsed.render = true;
+      index += 1;
     } else if (flag === "--voice" && value && !value.startsWith("--")) {
       parsed.voice = value;
       index += 2;
     } else {
-      throw new Error("Usage: pnpm demo -- [--output <directory>] [--source <markdown-path> [--desktop <startupos-root>]] [--tts [--voice <name>]]");
+      throw new Error("Usage: pnpm demo -- [--output <directory>] [--source <markdown-path> [--desktop <startupos-root>]] [--tts [--voice <name>]] [--render]");
     }
   }
   if (parsed.desktopRoot && !parsed.source) {

@@ -1,5 +1,6 @@
 import type {
   DemoActionRecord,
+  Composition,
   EntryPointCandidate,
   EvidencePack,
   GateResult,
@@ -55,6 +56,13 @@ export type NarrationPort = (
   release: ReleaseBrief,
   scenePlan: ScenePlan,
 ) => Promise<NarrationArtifact> | NarrationArtifact;
+
+export type CompositionPort = (input: {
+  runId: string;
+  runDirectory: string;
+  manifest: RenderManifest;
+  narration?: NarrationArtifact;
+}) => Promise<Composition> | Composition;
 
 export type NarrationErrorPhase = "handshake" | "synthesize";
 
