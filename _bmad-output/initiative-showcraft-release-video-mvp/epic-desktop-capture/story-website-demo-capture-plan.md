@@ -3,7 +3,8 @@ title: 'DeepMatch 网站上传图纸匹配供应商功能录屏（首轮验证�
 type: 'feature'
 ticket: '10'
 created: '2026-10-19'
-status: 'ready-for-dev'
+status: 'in-progress'
+baseline_revision: '4501652b0cbd1a39bfa44e5e504f9be48184227f'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -75,6 +76,11 @@ context:
 ## Implementation Notes
 
 - 本计划已于 2026-10-19 获用户批准并进入 ready-for-dev；本轮不改 ShowCraft 产品代码、website 仓库或 OpenSpec。实施完成后的真实 run 路径、两轮 `actions.json` 比对结果及全量测试结果在此回填。
+- 2026-10-19：已实现 `scripts/website-demo/capture.sh`、`page-flow.mjs`、`assemble-actions.mjs`。dry-run 实测成功（pageStatus=200、matchedResultPresent=true，页面流 11.8–13.0s）；assembler 成功/action_failed/recording_failed 三种契约矩阵及成功字节幂等实测通过。
+- 2026-10-19：系统录制结构验证产出 `runs/website-demo-20261019T040639Z-95970` 与 `runs/website-demo-20261019T040911Z-97124`：时长分别 90.018s / 90.023s，大小 103,336,657 / 140,581,330 bytes，页面流 12.393s / 13.588s，缩略图提取 846ms / 693ms；两份 actions.json 字节相同、两份 MOV 均为 `ftypqt`。后续修正完成态截图滚动后，`runs/website-demo-20261019T041307Z-1802/matched-state.png` 已目检为匹配完成态。
+- 未完成：系统录屏视觉目检发现 ego-browser 的 agent task-space 页面未成为主显示器前台；MOV 录到 Ego Lite 的其他 tab/系统钥匙串弹窗而非 DeepMatch 操作。因此上述 run 仅作为失败诊断证据，不作为成功交付；需人工将本 run 的 agent task-space 页面置前并清除系统弹窗后重采两轮。本计划 Tasks 保持未勾选，避免伪成功。
+- 矩阵审计：#1 的结构与页面流通过但视觉验收失败；#7–#9 实测通过；#4/#6 仅以 assembler 合成输入验证失败记录契约；#2/#3/#5/#10 未做活体故障注入（当前 4321 为须保留的既有 DeepMatch 服务）。这些缺口不得计作验收通过。
+- 回归：`pnpm lint && pnpm typecheck && pnpm test` 全绿（25 files / 338 tests）；`openspec validate showcraft-release-video-mvp --strict` 通过；website 仓库状态前后一致，4321 复用既有服务，无 screencapture 残留，3100 未触碰。
 
 ## Plan Change Log
 
