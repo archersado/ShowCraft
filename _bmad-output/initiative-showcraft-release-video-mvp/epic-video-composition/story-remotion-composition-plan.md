@@ -3,7 +3,7 @@ title: 'Remotion composition 消费 manifest 渲染 MP4'
 type: 'feature'
 ticket: '12'
 created: '2026-10-18'
-status: draft
+status: built
 baseline_revision: 23ed91978e1b06ec9568d3d1d7889d624d3795d2
 route: 'full'
 route_source: 'auto'
