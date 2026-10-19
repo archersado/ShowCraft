@@ -1,9 +1,21 @@
 import {
   DomainValidationError,
+  demoActionsSchema,
+  entryPointCandidateSchema,
+  evidencePackSchema,
+  gateResultSchema,
+  narrationArtifactSchema,
+  compositionSchema,
   releaseBriefSchema,
   renderManifestSchema,
   runRecordSchema,
   scenePlanSchema,
+  type EntryPointCandidate,
+  type DemoActions,
+  type EvidencePack,
+  type GateResult,
+  type NarrationArtifact,
+  type Composition,
   type ReleaseBrief,
   type RenderManifest,
   type RunRecord,
@@ -19,15 +31,30 @@ import { parseWithSchema, stableJsonBytes } from "./serialization.js";
  * the CLI adapter (packages/cli/src/runStore.ts).
  */
 
-/** Stages whose artifacts the mock release pipeline persists today. */
-export type RunStage = "release" | "scenePlan" | "manifest";
+/** Stages whose artifacts the release pipeline persists. Evidence and gate run
+ * only when the corresponding ports are provided; the mock pipeline skips both. */
+export type RunStage = "release" | "evidence" | "gate" | "desktop" | "scenePlan" | "narration" | "manifest" | "composition";
 
-export const runStageOrder: readonly RunStage[] = ["release", "scenePlan", "manifest"];
+export const runStageOrder: readonly RunStage[] = [
+  "release",
+  "evidence",
+  "gate",
+  "desktop",
+  "scenePlan",
+  "narration",
+  "manifest",
+  "composition",
+];
 
 export const stageFileNames: Record<RunStage, string> = {
   release: "release.json",
+  evidence: "evidence.json",
+  gate: "gate.json",
+  desktop: "actions.json",
   scenePlan: "scene.json",
+  narration: "narration.json",
   manifest: "manifest.json",
+  composition: "composition.json",
 };
 
 export type StageFailure = {
@@ -68,8 +95,13 @@ const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
 /** A schema-validated artifact awaiting persistence, tagged by stage. */
 export type StageArtifact =
   | { stage: "release"; value: ReleaseBrief }
+  | { stage: "evidence"; value: { pack: EvidencePack; entryPoints: EntryPointCandidate[] } }
+  | { stage: "gate"; value: GateResult }
+  | { stage: "desktop"; value: DemoActions }
   | { stage: "scenePlan"; value: ScenePlan }
-  | { stage: "manifest"; value: RenderManifest };
+  | { stage: "narration"; value: NarrationArtifact }
+  | { stage: "manifest"; value: RenderManifest }
+  | { stage: "composition"; value: Composition };
 
 export class RunStoreCore {
   private readonly runId: string;
@@ -123,13 +155,44 @@ export class RunStoreCore {
       if (!result.success) {
         throw new DomainValidationError(result.issues);
       }
+    } else if (artifact.stage === "evidence") {
+      const result = parseWithSchema(evidencePackChecker, artifact.value.pack);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
+      for (const candidate of artifact.value.entryPoints) {
+        const candidateResult = parseWithSchema(entryPointChecker, candidate);
+        if (!candidateResult.success) {
+          throw new DomainValidationError(candidateResult.issues);
+        }
+      }
+    } else if (artifact.stage === "gate") {
+      const result = parseWithSchema(gateChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
+    } else if (artifact.stage === "desktop") {
+      const result = parseWithSchema(demoActionsChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
     } else if (artifact.stage === "scenePlan") {
       const result = parseWithSchema(scenePlanChecker, artifact.value);
       if (!result.success) {
         throw new DomainValidationError(result.issues);
       }
-    } else {
+    } else if (artifact.stage === "narration") {
+      const result = parseWithSchema(narrationChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
+    } else if (artifact.stage === "manifest") {
       const result = parseWithSchema(manifestChecker, artifact.value);
+      if (!result.success) {
+        throw new DomainValidationError(result.issues);
+      }
+    } else {
+      const result = parseWithSchema(compositionChecker, artifact.value);
       if (!result.success) {
         throw new DomainValidationError(result.issues);
       }
@@ -137,7 +200,12 @@ export class RunStoreCore {
 
     const file: RunStoreFile = {
       fileName: stageFileNames[artifact.stage],
-      bytes: stableJsonBytes(artifact.value),
+      // The evidence artifact persists as its pack plus entry-point list;
+      // entryPoints are keyed inside the file for single-file round trips.
+      bytes:
+        artifact.stage === "evidence"
+          ? stableJsonBytes({ ...artifact.value.pack, entryPoints: artifact.value.entryPoints })
+          : stableJsonBytes(artifact.value),
     };
     this.pendingFiles.push(file);
     if (this.status === "pending") {
@@ -176,5 +244,11 @@ export class RunStoreCore {
 }
 
 const releaseBriefChecker = releaseBriefSchema;
+const evidencePackChecker = evidencePackSchema;
+const entryPointChecker = entryPointCandidateSchema;
+const gateChecker = gateResultSchema;
+const demoActionsChecker = demoActionsSchema;
 const scenePlanChecker = scenePlanSchema;
+const narrationChecker = narrationArtifactSchema;
 const manifestChecker = renderManifestSchema;
+const compositionChecker = compositionSchema;
