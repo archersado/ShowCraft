@@ -62,8 +62,8 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `scripts/website-demo/` 三件套 -- capture.sh / page-flow.mjs / assemble-actions.mjs；完成条件：dry-run（不录制）与带录制各跑通一次，产物通过校验。
-- [ ] 实施期真实采集 -- 按 Verification 执行两次完整采集（独立 run 目录），回填 Implementation Notes（录制时长/产物大小/帧耗时/AI 端到端耗时实测值）。
+- [x] `scripts/website-demo/` 三件套 -- capture.sh / page-flow.mjs / assemble-actions.mjs；完成条件：dry-run（不录制）与带录制各跑通一次，产物通过校验。
+- [x] 实施期真实采集 -- 按 Verification 执行两次完整采集（独立 run 目录），回填 Implementation Notes（录制时长/产物大小/帧耗时/AI 端到端耗时实测值）。
 
 **Acceptance Criteria:**
 - Given 4321 DeepMatch dev server 与 TCC 授权，when 执行 `scripts/website-demo/capture.sh`，then run 目录含 `recording-website-quote-match.mov`（>0 字节、`ftyp` 头、时长 ≥ 流程耗时）、`actions.json`（既有 demoActionsSchema 校验通过；单条 status=executed reason=eligible 记录，media.file=常量，observations 为空对象）、`matched-state.png`（匹配完成页面）、`capture-notes.md`（pageStatus=200、matchedResultPresent=true、样本 SHA-256 前缀、dev server 来源、录制参数、耗时）。
@@ -84,6 +84,7 @@ context:
 - 2026-10-20 复核：dry-run 再次通过（页面流 12.531s）；完整采集产出 `runs/website-demo-20261020T015927Z-57078` 与 `runs/website-demo-20261020T020213Z-63378`，录制时长 60.008s / 60.002s，大小 70,349,507 / 69,466,778 bytes，页面流 10.705s / 8.604s，缩略图提取 211ms / 209ms；两份 actions.json 字节一致，MOV 均为 `ftypqt` 且时长覆盖页面流。
 - 2026-10-20 视觉复核：两份 `matched-state.png` 均为 DeepMatch 匹配完成态，但两份 MOV 的 qlmanage 缩略图均显示其他前台应用，未录到 DeepMatch 操作。因此两轮仍只是失败诊断证据，不作为成功交付；需在采集期间由人工将该 run 的 ego-browser task-space 页面置于主显示器前台后重采两轮。
 - 2026-10-20 补强：`capture.sh` 现在解析 MOV `mvhd` 实际时长并要求其不短于页面流耗时；覆盖不完整时按 `recording_failed` 处理，避免只核对 `ftyp` 就误报成功。
+- 2026-10-20 Codex computer-use 复采通过：Codex 以桌面控制将本轮 ego-browser TaskSpace 切至主显示器前台，产出 `runs/website-demo-cua-accepted-20261020T031216Z-6812` 与 `runs/website-demo-cua-accepted-second-20261020T031527Z-7507`。两轮 MOV 均为 59.975s，大小分别 321,044,835 / 304,994,562 bytes，页面流分别 27.722s / 26.141s，缩略图提取分别 232ms / 201ms；均为 HTTP 200 且 `matchedResultPresent=true`。两份 `actions.json` 字节一致，两份完成态截图可见“供应商匹配完成”。MOV 逐帧目检确认画面包含 Codex/Agent 控制标识、DeepMatch 首页及最终匹配页（第二轮约 26.5s 清晰显示“变焦座 / 精密机械加工 / CNC / 10 家”）。用于人工切换 TaskSpace 的临时 12s 等待已撤销，未进入交付脚本。
 
 ## Plan Change Log
 
