@@ -8,7 +8,10 @@ if (
   typeof input.samplePath !== "string" ||
   typeof input.screenshotPath !== "string" ||
   typeof input.resultPath !== "string" ||
-  typeof input.taskSpaceName !== "string"
+  typeof input.taskSpaceName !== "string" ||
+  !Number.isFinite(input.postResultHoldMs) ||
+  input.postResultHoldMs < 0 ||
+  input.postResultHoldMs > 5000
 ) {
   throw new Error("website demo input is missing or invalid");
 }
@@ -19,6 +22,7 @@ const startedAt = Date.now();
 let task;
 let pageStatus = 0;
 let matchedResultPresent = false;
+let postResultHoldMs = 0;
 let diagnostics;
 let finishDiagnostics;
 
@@ -48,6 +52,11 @@ try {
   });
   await page.waitForTimeout(300);
   await page.screenshot({ path: input.screenshotPath, fullPage: false });
+
+  postResultHoldMs = input.postResultHoldMs;
+  if (postResultHoldMs > 0) {
+    await page.waitForTimeout(postResultHoldMs);
+  }
   matchedResultPresent = true;
 } catch (error) {
   diagnostics = error instanceof Error ? error.message : String(error);
@@ -71,6 +80,7 @@ const result = {
   pageStatus,
   matchedResultPresent,
   elapsedMs: Date.now() - startedAt,
+  postResultHoldMs,
   taskSpaceName: input.taskSpaceName,
   ...(diagnostics ? { diagnostics: diagnostics.slice(0, 2048) } : {}),
 };

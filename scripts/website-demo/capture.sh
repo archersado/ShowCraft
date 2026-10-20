@@ -142,7 +142,11 @@ mkdir -p "$FLOW_DIR"
 PAGE_RESULT="$FLOW_DIR/page-flow-result.json"
 SCREENSHOT="$FLOW_DIR/matched-state.png"
 TASK_SPACE="showcraft-website-demo-${RUN_ID}"
-FLOW_INPUT=$(node -e 'console.log(JSON.stringify({baseUrl:process.argv[1],samplePath:process.argv[2],screenshotPath:process.argv[3],resultPath:process.argv[4],taskSpaceName:process.argv[5]}))' "$BASE_URL" "$SAMPLE_COPY" "$SCREENSHOT" "$PAGE_RESULT" "$TASK_SPACE")
+POST_RESULT_HOLD_MS=0
+if (( ! DRY_RUN )); then
+  POST_RESULT_HOLD_MS=5000
+fi
+FLOW_INPUT=$(node -e 'console.log(JSON.stringify({baseUrl:process.argv[1],samplePath:process.argv[2],screenshotPath:process.argv[3],resultPath:process.argv[4],taskSpaceName:process.argv[5],postResultHoldMs:Number(process.argv[6])}))' "$BASE_URL" "$SAMPLE_COPY" "$SCREENSHOT" "$PAGE_RESULT" "$TASK_SPACE" "$POST_RESULT_HOLD_MS")
 PAGE_FLOW_URL=$(node -e 'console.log(require("node:url").pathToFileURL(process.argv[1]).href)' "$SCRIPT_DIR/page-flow.mjs")
 BOOTSTRAP="globalThis.__SHOWCRAFT_WEBSITE_DEMO_INPUT__=${FLOW_INPUT};await import(${(qqq)PAGE_FLOW_URL})"
 
@@ -220,6 +224,7 @@ pnpm --dir "$PROJECT_ROOT" exec tsx "$SCRIPT_DIR/assemble-actions.mjs" \
 PAGE_STATUS_RESULT=$(node -e 'const r=require(process.argv[1]); console.log(r.pageStatus ?? 0)' "$PAGE_RESULT")
 MATCHED_RESULT=$(node -e 'const r=require(process.argv[1]); console.log(r.matchedResultPresent === true)' "$PAGE_RESULT")
 PAGE_DIAGNOSTICS=$(node -e 'const r=require(process.argv[1]); console.log(String(r.diagnostics ?? "").slice(0,2048))' "$PAGE_RESULT")
+POST_RESULT_HOLD_MS=$(node -e 'const r=require(process.argv[1]); console.log(r.postResultHoldMs ?? 0)' "$PAGE_RESULT")
 RECORDING_BYTES=0
 [[ -s "$RECORDING_PATH" ]] && RECORDING_BYTES=$(stat -f '%z' "$RECORDING_PATH")
 
@@ -237,6 +242,7 @@ cat > "$RUN_DIR/capture-notes.md" <<EOF
 - recordingDurationSeconds: $RECORDING_DURATION
 - recordingBytes: $RECORDING_BYTES
 - pageFlowElapsedMs: $FLOW_ELAPSED_MS
+- postResultHoldMs: $POST_RESULT_HOLD_MS
 - thumbnailExtractionMs: $THUMBNAIL_MS
 - diagnostics: ${PAGE_DIAGNOSTICS:-none}
 EOF
