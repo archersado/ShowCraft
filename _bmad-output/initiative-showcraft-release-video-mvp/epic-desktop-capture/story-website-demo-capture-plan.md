@@ -81,6 +81,9 @@ context:
 - 未完成：系统录屏视觉目检发现 ego-browser 的 agent task-space 页面未成为主显示器前台；MOV 录到 Ego Lite 的其他 tab/系统钥匙串弹窗而非 DeepMatch 操作。因此上述 run 仅作为失败诊断证据，不作为成功交付；需人工将本 run 的 agent task-space 页面置前并清除系统弹窗后重采两轮。本计划 Tasks 保持未勾选，避免伪成功。
 - 矩阵审计：#1 的结构与页面流通过但视觉验收失败；#7–#9 实测通过；#4/#6 仅以 assembler 合成输入验证失败记录契约；#2/#3/#5/#10 未做活体故障注入（当前 4321 为须保留的既有 DeepMatch 服务）。这些缺口不得计作验收通过。
 - 回归：`pnpm lint && pnpm typecheck && pnpm test` 全绿（25 files / 338 tests）；`openspec validate showcraft-release-video-mvp --strict` 通过；website 仓库状态前后一致，4321 复用既有服务，无 screencapture 残留，3100 未触碰。
+- 2026-10-20 复核：dry-run 再次通过（页面流 12.531s）；完整采集产出 `runs/website-demo-20261020T015927Z-57078` 与 `runs/website-demo-20261020T020213Z-63378`，录制时长 60.008s / 60.002s，大小 70,349,507 / 69,466,778 bytes，页面流 10.705s / 8.604s，缩略图提取 211ms / 209ms；两份 actions.json 字节一致，MOV 均为 `ftypqt` 且时长覆盖页面流。
+- 2026-10-20 视觉复核：两份 `matched-state.png` 均为 DeepMatch 匹配完成态，但两份 MOV 的 qlmanage 缩略图均显示其他前台应用，未录到 DeepMatch 操作。因此两轮仍只是失败诊断证据，不作为成功交付；需在采集期间由人工将该 run 的 ego-browser task-space 页面置于主显示器前台后重采两轮。
+- 2026-10-20 补强：`capture.sh` 现在解析 MOV `mvhd` 实际时长并要求其不短于页面流耗时；覆盖不完整时按 `recording_failed` 处理，避免只核对 `ftyp` 就误报成功。
 
 ## Plan Change Log
 

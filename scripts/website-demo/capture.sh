@@ -180,9 +180,11 @@ fi
 
 RECORDING_STATE=invalid
 THUMBNAIL_MS=0
+RECORDING_DURATION=unknown
 if (( RECORDING_EXIT == 0 )) && [[ -s "$RECORDING_PATH" ]]; then
   FTYP=$(python3 -c 'import sys; print(open(sys.argv[1], "rb").read(12)[4:12].decode("ascii", "replace"))' "$RECORDING_PATH")
   if [[ "$FTYP" == 'ftypqt  ' ]]; then
+    RECORDING_DURATION=$(python3 -c 'import struct,sys; data=open(sys.argv[1], "rb").read(); offset=data.find(b"mvhd"); assert offset >= 0, "mvhd atom missing"; version=data[offset+4]; timescale_offset=offset+(24 if version else 16); duration_offset=offset+(28 if version else 20); timescale=struct.unpack(">I", data[timescale_offset:timescale_offset+4])[0]; duration_size=8 if version else 4; duration=struct.unpack(">Q" if version else ">I", data[duration_offset:duration_offset+duration_size])[0]; print(f"{duration/timescale:.3f}")' "$RECORDING_PATH" 2>/dev/null || print unknown)
     THUMB_DIR="$WORK_DIR/thumbnail"
     mkdir "$THUMB_DIR"
     THUMB_STARTED_MS=$(python3 -c 'import time; print(round(time.time() * 1000))')
@@ -194,6 +196,10 @@ if (( RECORDING_EXIT == 0 )) && [[ -s "$RECORDING_PATH" ]]; then
       RECORDING_STATE=valid
     fi
   fi
+fi
+
+if [[ "$RECORDING_STATE" == valid ]] && ! python3 -c 'import sys; duration=float(sys.argv[1]); flow_ms=int(sys.argv[2]); raise SystemExit(0 if duration * 1000 >= flow_ms else 1)' "$RECORDING_DURATION" "$FLOW_ELAPSED_MS" 2>/dev/null; then
+  RECORDING_STATE=invalid
 fi
 
 if [[ "$RECORDING_STATE" == invalid ]] && [[ -e "$RECORDING_PATH" ]]; then
@@ -216,10 +222,6 @@ MATCHED_RESULT=$(node -e 'const r=require(process.argv[1]); console.log(r.matche
 PAGE_DIAGNOSTICS=$(node -e 'const r=require(process.argv[1]); console.log(String(r.diagnostics ?? "").slice(0,2048))' "$PAGE_RESULT")
 RECORDING_BYTES=0
 [[ -s "$RECORDING_PATH" ]] && RECORDING_BYTES=$(stat -f '%z' "$RECORDING_PATH")
-RECORDING_DURATION=unknown
-if [[ -s "$RECORDING_PATH" ]]; then
-  RECORDING_DURATION=$(python3 -c 'import struct,sys; data=open(sys.argv[1], "rb").read(); offset=data.find(b"mvhd"); assert offset >= 0, "mvhd atom missing"; version=data[offset+4]; timescale_offset=offset+(24 if version else 16); duration_offset=offset+(28 if version else 20); timescale=struct.unpack(">I", data[timescale_offset:timescale_offset+4])[0]; duration_size=8 if version else 4; duration=struct.unpack(">Q" if version else ">I", data[duration_offset:duration_offset+duration_size])[0]; print(f"{duration/timescale:.3f}")' "$RECORDING_PATH" 2>/dev/null || print unknown)
-fi
 
 cat > "$RUN_DIR/capture-notes.md" <<EOF
 # Website Demo Capture Notes
