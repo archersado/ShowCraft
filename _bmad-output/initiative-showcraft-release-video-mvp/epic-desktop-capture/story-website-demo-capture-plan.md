@@ -3,7 +3,7 @@ title: 'DeepMatch 网站上传图纸匹配供应商功能录屏（首轮验证�
 type: 'feature'
 ticket: '10'
 created: '2026-10-19'
-status: 'built'
+status: 'in-progress'
 baseline_revision: '4501652b0cbd1a39bfa44e5e504f9be48184227f'
 route: 'full'
 route_source: 'auto'
@@ -23,7 +23,7 @@ context:
 
 **Problem:** epic 4 已收口（4.1–4.3 ✅），StartUpOS v0.3.3「感知与 IM 路由」视频链路（changelog → 证据 → Desktop 录屏 → 配音 → 合成）全部落地，但首轮验收目标只有 StartUpOS 一个样本。用户 2026-10-15 追加「网站录屏」作为**首轮验证目标 2**（与目标 1 并存、不插入原故事序列）：对 DeepMatch 官网（`/Users/archersado/workspace/website`，包名 deepmatch-website，Next.js 16）的「上传图纸，匹配对应产品供应商」功能（`components/quote-matcher.tsx`，section `#quick-quote`）做真实操作录屏，验证 ShowCraft 的「能力 + 步骤规划」载体能否以**已有 run 目录 / actions.json / media 引用契约**承载第二条真实录屏产物——即在不改动 ShowCraft 既有产品行为、不新增 npm 依赖、不写 website 仓库任何文件的前提下，产出「录屏素材 + run 记录」。用户 2026-10-19 指示工具链为：agent 控制 ego-browser 操作页面 + 对产品录屏；页面操作与系统级录屏是两个平面。
 
-**Approach:** 本 story 不走 ShowCraft `--source`+`--desktop` 完整管线（DeepMatch 网站无 `desktop-v*` 式 git 标签证据链，强行走 gate 会伪造证据），而是交付一个**可重复执行的采集脚本**（只调既有 ShowCraft 契约，不新增 CLI 面、不改 pipeline）：ego-browser 单实例打开 DeepMatch 首页 → `setInputFiles` 上传样本图纸（本地临时副本）→ 等待「供应商匹配完成」状态（DOM 结构信号：上传 input 节点分离，语言无关）→ 截图存证；录屏平面沿用 3.3 已验收的 `/usr/sbin/screencapture -v -V <sec> -D 1`（TCC 已授权、QuickTime H.264 直写、零依赖），在动作前启动、动作完成后等待自然退出并校验产物（非空 + `ftyp` 头）。产物落 run 目录（`runs/website-demo-<runId>/`）：`recording-website-quote-match.mov` + `actions.json`（既有 `DemoActionRecord` schema 校验，单步复合动作）+ `matched-state.png`（匹配完成截图）+ `capture-notes.md`（页面状态码、匹配完成事实、URL、样本 SHA-256、dev server 来源、ego task space、录制参数）。`actions.json` 保持既有 schema 且使用常量 `observations: {}`；成功事实由 `status=executed`、`reason=eligible`、成功 media 引用及配套 notes/screenshot 共同表达。AI 识别的产品名/类目/供应商名单等时间敏感文本**只存在于录屏与截图中**，保证重复运行 actions.json 字节幂等（沿用 3.3 修订：媒体文件存在性/ftyp 核对、不比字节）。ShowCraft 产品代码、既有 338 测试、mock 4 文件与 `--source` 5 文件契约均零改动。
+**Approach:** 本 story 不走 ShowCraft `--source`+`--desktop` 完整管线（DeepMatch 网站无 `desktop-v*` 式 git 标签证据链，强行走 gate 会伪造证据），而是交付一个**可重复执行的采集脚本**（只调既有 ShowCraft 契约，不新增 CLI 面、不改 pipeline）：ego-browser 单实例打开 DeepMatch 首页 → 将 `#quick-quote` 平滑滚动到可视区 → `setInputFiles` 上传样本图纸（本地临时副本）→ 等待「供应商匹配完成」状态（DOM 结构信号：上传 input 节点分离，语言无关）→ 再将结果区滚动到可视区并截图存证；录屏平面沿用 3.3 已验收的 `/usr/sbin/screencapture -v -V <sec> -D 1`（TCC 已授权、QuickTime H.264 直写、零依赖），在动作前启动、动作完成后等待自然退出并校验产物（非空 + `ftyp` 头）。产物落 run 目录（`runs/website-demo-<runId>/`）：`recording-website-quote-match.mov` + `actions.json`（既有 `DemoActionRecord` schema 校验，单步复合动作）+ `matched-state.png`（匹配完成截图）+ `capture-notes.md`（页面状态码、匹配完成事实、URL、样本 SHA-256、dev server 来源、ego task space、录制参数）。`actions.json` 保持既有 schema 且使用常量 `observations: {}`；成功事实由 `status=executed`、`reason=eligible`、成功 media 引用及配套 notes/screenshot 共同表达。AI 识别的产品名/类目/供应商名单等时间敏感文本**只存在于录屏与截图中**，保证重复运行 actions.json 字节幂等（沿用 3.3 修订：媒体文件存在性/ftyp 核对、不比字节）。ShowCraft 产品代码、既有 338 测试、mock 4 文件与 `--source` 5 文件契约均零改动。
 
 ## Boundaries & Constraints
 
@@ -87,12 +87,14 @@ context:
 - 2026-10-20 Codex computer-use 复采通过：Codex 以桌面控制将本轮 ego-browser TaskSpace 切至主显示器前台，产出 `runs/website-demo-cua-accepted-20261020T031216Z-6812` 与 `runs/website-demo-cua-accepted-second-20261020T031527Z-7507`。两轮 MOV 均为 59.975s，大小分别 321,044,835 / 304,994,562 bytes，页面流分别 27.722s / 26.141s，缩略图提取分别 232ms / 201ms；均为 HTTP 200 且 `matchedResultPresent=true`。两份 `actions.json` 字节一致，两份完成态截图可见“供应商匹配完成”。MOV 逐帧目检确认画面包含 Codex/Agent 控制标识、DeepMatch 首页及最终匹配页（第二轮约 26.5s 清晰显示“变焦座 / 精密机械加工 / CNC / 10 家”）。用于人工切换 TaskSpace 的临时 12s 等待已撤销，未进入交付脚本。
 - 2026-10-20 用户复核反馈 Ego Lite 在完成操作后退出过快。根因为 `page-flow.mjs` 截图后立即 `finish({ keep: [] })`，而系统录屏仍在继续。采集脚本现于完成态截图后固定驻留 5 秒，并在 `capture-notes.md` 记录实际 `postResultHoldMs`；dry-run 不增加等待。这样完整匹配结果会明确停留展示，收尾仍由本 run 自己执行，不遗留 TaskSpace，也不会让页面流随录制时长无限延长。
 - 2026-10-20 驻留修复验证：新增 2 个 Vitest，覆盖正式录制 wait-before-finish、dry-run 零驻留和结果字段；全量 `pnpm lint`、`pnpm typecheck`、26 files / 340 tests、OpenSpec strict validation 均通过。修复后真实 dry-run 复跑被 website 仓库外部既有 Next dev 锁阻止（其报告 localhost:3000、PID 35261）；未终止或修改该外部进程，因此本轮没有新增视觉 MOV，需在可用的 4321 DeepMatch 服务与 desktop computer-use runtime 下复采。
+- 2026-10-21 滚动可视区修复：上传前平滑滚动 `#quick-quote` 并等待 600ms，匹配完成后再次平滑滚动再截图；同时收紧录屏覆盖为流程耗时至少 2 倍、TaskSpace 收尾失败不再保留成功事实、notes 写入失败显式失败。新增/更新 3 个 Vitest 覆盖完整顺序与收尾失败，全量 `pnpm lint`、`pnpm typecheck`、26 files / 341 tests、OpenSpec strict validation 均通过。当前 4321 无 DeepMatch 服务且 runtime 无 desktop CUA，未产生新视觉 MOV；issue 继续保持 in-progress 等待复采。
 
 ## Plan Change Log
 
 - 2026-10-19：基于 epic 4 收口基线与保留的规划期实测证据创建首版计划；录屏方式定案为系统级 `screencapture`，契约承载定案为独立采集脚本 + 既有 run/actions/media 语义，不新增 ShowCraft CLI 面。
 - 2026-10-19：用户批准计划；状态更新为 `ready-for-dev`，`<frozen-after-approval>` 区块自此锁定，后续范围或契约变化须重新评审。
 - 2026-10-20：根据用户对已交付录像的复核反馈，修正 TaskSpace 收尾时序；不改变冻结范围、完成信号、媒体契约或工具边界。
+- 2026-10-21：用户明确要求操作时将屏幕滚动到对应区块；页面流在上传前平滑滚动到 `#quick-quote`，完成后再次滚动并截图，媒体与动作契约不变。
 
 ## Review Triage Log
 
@@ -126,6 +128,30 @@ context:
 - 2026-10-20 thorough review `VG-01` — **medium / patch（已修复）**：新增 `websiteDemoPageFlow.test.ts` 覆盖正式驻留、dry-run 零驻留、`postResultHoldMs` 与 `finish()` 顺序。
 - 2026-10-20 thorough review `VG-02` — **medium / defer**：assembler 三分支仅有实施期命令验证，缺少纳入常规 Vitest 的回归测试。
 - 2026-10-20 thorough review `VG-03` — **medium / defer**：MOV 损坏/过短/缩略图失败隔离路径缺少 deterministic fixture 测试。
+- 2026-10-21 thorough review `BH2-01` — **false**：两个绝对路径是本机专用采集目标与冻结意图明确给定的输入，并非跨机器公开 CLI。
+- 2026-10-21 thorough review `BH2-02` — **high / defer（carried EC-09）**：自启 Next 可能写 ignored `.next` 的只读冲突保持原延期结论，本轮未触发自启或写 website。
+- 2026-10-21 thorough review `BH2-03` — **medium / defer（carried EC-08）**：收尾 website status 读取失败可被忽略，保持原延期结论。
+- 2026-10-21 thorough review `BH2-04` — **medium / defer（carried BH-11）**：非 DeepMatch 端口占用诊断缺少占用者摘要，保持原延期结论。
+- 2026-10-21 thorough review `BH2-05` — **medium / defer（carried BH-12）**：dev server 就绪超时缺少日志尾部，保持原延期结论。
+- 2026-10-21 thorough review `BH2-06` — **medium / defer（carried BH-10）**：录制失败诊断未带退出码与日志摘要，保持原延期结论。
+- 2026-10-21 thorough review `BH2-07` — **medium / patch（已修复）**：TaskSpace `finish()` 失败会留下成功匹配事实；现强制 `matchedResultPresent=false` 并有回归测试。
+- 2026-10-21 thorough review `BH2-08` — **medium / patch（已修复）**：媒体原只校验覆盖 1 倍流程耗时；现校验至少覆盖 2 倍流程耗时。
+- 2026-10-21 thorough review `BH2-09` — **low / rejected（carried BH-06）**：异常中断录屏由有界 `-V` 自然收尾，强杀会损坏 MOV。
+- 2026-10-21 thorough review `BH2-10` — **maybe-false / rejected（carried BH-07/BH-08）**：当前真实 QuickTime 样本解析稳定，未有畸形 MOV 证明误判。
+- 2026-10-21 thorough review `BH2-11` — **medium / defer（carried BH-13/VG-02/VG-03）**：assembler 与 MOV fixture 常规自动化缺口保持延期；本轮页面流覆盖增至 3 个用例。
+- 2026-10-21 thorough review `BH2-12` — **false**：任务勾选记录既有两轮已完成采集，最新增量复采缺口已在 Implementation Notes 明示且状态保持 in-progress。
+- 2026-10-21 thorough review `BH2-13` — **false**：计划当前不存在“Tasks 保持未勾选”的矛盾文本。
+- 2026-10-21 thorough review `BH2-14` — **low / rejected（carried BH-14/BH-15）**：render 快照为工作流生成且未纳入本次提交，历史绝对路径卫生问题维持延期。
+- 2026-10-21 thorough review `EC2-01` — **medium / patch（同 BH2-07，已修复）**：收尾失败不再产生 executed 事实。
+- 2026-10-21 thorough review `EC2-02` — **medium / patch（已修复）**：`capture-notes.md` 写入失败过去可能被后续命令掩盖；现立即显式失败。
+- 2026-10-21 thorough review `EC2-03` — **medium / defer（carried EC-08）**：最终 git status 读取失败门禁维持延期。
+- 2026-10-21 thorough review `EC2-04` — **low / rejected**：研发专用录制时长虽无上限，但日常由固定 90 秒命令驱动，额外限制并非本轮必要复杂度。
+- 2026-10-21 thorough review `EC2-05` — **maybe-false / rejected（carried BH-08）**：无畸形 atom fixture 能证明当前解析误判。
+- 2026-10-21 thorough review `EC2-06` — **low / patch（已修复）**：测试动态 import 抛错会泄漏临时目录；现用 `finally` 清理。
+- 2026-10-21 thorough review `EC2-07` — **high / defer（carried EC-09）**：严格只读与自启 Next 的冲突维持延期，本轮未触发。
+- 2026-10-21 thorough review `VG2-01` — **medium / defer（carried VG-02）**：assembler 三分支缺少常规 fixture 测试。
+- 2026-10-21 thorough review `VG2-02` — **medium / defer（carried VG-03）**：MOV 损坏/过短/缩略图失败缺少 deterministic fixture。
+- 2026-10-21 thorough review `VG2-03` — **medium / patch（同 BH2-07，已修复）**：finish 失败与 executed 矛盾已消除并回归覆盖。
 
 ## Design Notes
 

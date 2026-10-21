@@ -9,7 +9,7 @@ const pageFlowUrl = pathToFileURL(
   join(process.cwd(), "scripts/website-demo/page-flow.mjs"),
 ).href;
 
-const runPageFlow = async (postResultHoldMs: number) => {
+const runPageFlow = async (postResultHoldMs: number, finishFails = false) => {
   const directory = await mkdtemp(join(tmpdir(), "showcraft-page-flow-"));
   const resultPath = join(directory, "result.json");
   const events: string[] = [];
@@ -17,9 +17,15 @@ const runPageFlow = async (postResultHoldMs: number) => {
   const page = {
     goto: vi.fn(),
     fetch: vi.fn().mockResolvedValue({ status: 200 }),
-    waitForSelector: vi.fn(),
-    setInputFiles: vi.fn(),
-    evaluate: vi.fn(),
+    waitForSelector: vi.fn(async (_selector: string, options: { state: string }) => {
+      events.push(`selector:${options.state}`);
+    }),
+    setInputFiles: vi.fn(async () => {
+      events.push("upload");
+    }),
+    evaluate: vi.fn(async () => {
+      events.push("scroll");
+    }),
     waitForTimeout: vi.fn(async (delay: number) => {
       waits.push(delay);
       events.push(`wait:${delay}`);
@@ -30,6 +36,7 @@ const runPageFlow = async (postResultHoldMs: number) => {
   };
   const finish = vi.fn(async () => {
     events.push("finish");
+    if (finishFails) throw new Error("finish failed");
   });
 
   Object.assign(globalThis, {
@@ -47,15 +54,18 @@ const runPageFlow = async (postResultHoldMs: number) => {
     }),
   });
 
-  await import(`${pageFlowUrl}?case=${postResultHoldMs}-${crypto.randomUUID()}`);
+  try {
+    await import(`${pageFlowUrl}?case=${postResultHoldMs}-${crypto.randomUUID()}`);
 
-  const result = {
-    events,
-    waits,
-    result: JSON.parse(await readFile(resultPath, "utf8")),
-  };
-  await rm(directory, { recursive: true, force: true });
-  return result;
+    return {
+      events,
+      waits,
+      result: JSON.parse(await readFile(resultPath, "utf8")),
+    };
+  } finally {
+    process.exitCode = undefined;
+    await rm(directory, { recursive: true, force: true });
+  }
 };
 
 afterEach(() => {
@@ -67,16 +77,44 @@ describe("website demo page flow result hold", () => {
   it("holds a recording result before finishing the task space", async () => {
     const run = await runPageFlow(5000);
 
-    expect(run.waits).toEqual([300, 5000]);
-    expect(run.events).toEqual(["wait:300", "screenshot", "wait:5000", "finish"]);
+    expect(run.waits).toEqual([600, 300, 5000]);
+    expect(run.events).toEqual([
+      "selector:attached",
+      "scroll",
+      "wait:600",
+      "upload",
+      "selector:detached",
+      "scroll",
+      "wait:300",
+      "screenshot",
+      "wait:5000",
+      "finish",
+    ]);
     expect(run.result.postResultHoldMs).toBe(5000);
   });
 
   it("does not add a post-result hold for dry-run input", async () => {
     const run = await runPageFlow(0);
 
-    expect(run.waits).toEqual([300]);
-    expect(run.events).toEqual(["wait:300", "screenshot", "finish"]);
+    expect(run.waits).toEqual([600, 300]);
+    expect(run.events).toEqual([
+      "selector:attached",
+      "scroll",
+      "wait:600",
+      "upload",
+      "selector:detached",
+      "scroll",
+      "wait:300",
+      "screenshot",
+      "finish",
+    ]);
     expect(run.result.postResultHoldMs).toBe(0);
+  });
+
+  it("does not report a successful match when task-space cleanup fails", async () => {
+    const run = await runPageFlow(0, true);
+
+    expect(run.result.matchedResultPresent).toBe(false);
+    expect(run.result.diagnostics).toContain("task-space cleanup failed: finish failed");
   });
 });

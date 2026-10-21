@@ -202,7 +202,7 @@ if (( RECORDING_EXIT == 0 )) && [[ -s "$RECORDING_PATH" ]]; then
   fi
 fi
 
-if [[ "$RECORDING_STATE" == valid ]] && ! python3 -c 'import sys; duration=float(sys.argv[1]); flow_ms=int(sys.argv[2]); raise SystemExit(0 if duration * 1000 >= flow_ms else 1)' "$RECORDING_DURATION" "$FLOW_ELAPSED_MS" 2>/dev/null; then
+if [[ "$RECORDING_STATE" == valid ]] && ! python3 -c 'import sys; duration=float(sys.argv[1]); flow_ms=int(sys.argv[2]); raise SystemExit(0 if duration * 1000 >= flow_ms * 2 else 1)' "$RECORDING_DURATION" "$FLOW_ELAPSED_MS" 2>/dev/null; then
   RECORDING_STATE=invalid
 fi
 
@@ -246,6 +246,7 @@ cat > "$RUN_DIR/capture-notes.md" <<EOF
 - thumbnailExtractionMs: $THUMBNAIL_MS
 - diagnostics: ${PAGE_DIAGNOSTICS:-none}
 EOF
+(( $? == 0 )) || fail "could not write capture notes"
 
 rm -f "$RUN_DIR/page-flow-result.json"
 

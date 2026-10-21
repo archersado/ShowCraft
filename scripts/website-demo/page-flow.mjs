@@ -41,6 +41,13 @@ try {
     state: "attached",
     timeout: 15_000,
   });
+  await page.evaluate(() => {
+    document.querySelector("#quick-quote")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+  await page.waitForTimeout(600);
   await page.setInputFiles("loc=css:#quote-drawing-upload", [input.samplePath]);
   await page.waitForSelector("loc=css:#quote-drawing-upload", {
     state: "detached",
@@ -48,7 +55,10 @@ try {
   });
 
   await page.evaluate(() => {
-    document.querySelector("#quick-quote")?.scrollIntoView({ block: "start" });
+    document.querySelector("#quick-quote")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   });
   await page.waitForTimeout(300);
   await page.screenshot({ path: input.screenshotPath, fullPage: false });
@@ -71,6 +81,7 @@ try {
 }
 
 if (finishDiagnostics) {
+  matchedResultPresent = false;
   diagnostics = diagnostics
     ? `${diagnostics}; task-space cleanup failed: ${finishDiagnostics}`
     : `task-space cleanup failed: ${finishDiagnostics}`;
