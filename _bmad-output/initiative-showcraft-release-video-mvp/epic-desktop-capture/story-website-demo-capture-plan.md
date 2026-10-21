@@ -3,7 +3,7 @@ title: 'DeepMatch 网站上传图纸匹配供应商功能录屏（首轮验证�
 type: 'feature'
 ticket: '10'
 created: '2026-10-19'
-status: 'built'
+status: 'in-review'
 baseline_revision: '4501652b0cbd1a39bfa44e5e504f9be48184227f'
 route: 'full'
 route_source: 'auto'
