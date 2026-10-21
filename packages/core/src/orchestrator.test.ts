@@ -12,7 +12,41 @@ describe("runPipeline", () => {
     expect(store.currentStatus).toBe("completed");
     const files = store.collectFiles().map((file) => file.fileName);
     expect(files).toEqual(["release.json", "scene.json", "manifest.json", "run.json"]);
+    const manifest = JSON.parse(new TextDecoder().decode(
+      store.collectFiles().find((file) => file.fileName === "manifest.json")?.bytes,
+    ));
+    expect(manifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: ["scene-intro", "scene-mock-feature", "scene-outro"],
+      plannedTotalSeconds: 40,
+    }]);
   });
+
+  it.each([[1, [40]], [6, [76, 44]]] as const)(
+    "orchestrates %i features into the expected volumes",
+    async (featureCount, expectedTotals) => {
+      const ports = mockPorts();
+      ports.releaseSource = () => ({
+        version: "demo",
+        source: "fixture.md",
+        features: Array.from({ length: featureCount }, (_, index) => ({
+          id: `feature-${index}`,
+          title: `功能 ${index}`,
+          narration: `功能 ${index} 旁白`,
+        })),
+      });
+      const store = new RunStoreCore(`orch-duration-${featureCount}`);
+      await runPipeline(ports, store);
+      expect(store.currentStatus).toBe("completed");
+      const manifest = JSON.parse(new TextDecoder().decode(
+        store.collectFiles().find((file) => file.fileName === "manifest.json")?.bytes,
+      ));
+      expect(manifest.volumes.map((volume: { plannedTotalSeconds: number }) => volume.plannedTotalSeconds))
+        .toEqual(expectedTotals);
+      expect(manifest.volumes.flatMap((volume: { sceneIds: string[] }) => volume.sceneIds))
+        .toEqual(manifest.scenes.map((scene: { id: string }) => scene.id));
+    },
+  );
 
   it("records failure stage and keeps prior artifacts when the renderer throws", async () => {
     const ports = mockPorts();
@@ -33,6 +67,57 @@ describe("runPipeline", () => {
       new TextDecoder().decode(store.collectFiles().find((f) => f.fileName === "run.json")?.bytes),
     );
     expect(record.status).toBe("failed");
+  });
+
+  it("field-validates scene-plan output before relation validation or persistence", async () => {
+    const ports = mockPorts();
+    ports.scenePlanner = () => ({ scenes: null }) as never;
+    const store = new RunStoreCore("orch-invalid-scene-plan");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "scenePlan", reason: /releaseVersion|scenes/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
+  });
+
+  it("field-validates narration output before relation validation or persistence", async () => {
+    const ports = mockPorts();
+    ports.narration = () => ({ scenes: null }) as never;
+    const store = new RunStoreCore("orch-invalid-narration");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "narration", reason: /releaseVersion|scenes/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "run.json",
+    ]);
+  });
+
+  it("field-validates manifest output before relation validation or persistence", async () => {
+    const ports = mockPorts();
+    ports.renderer = () => ({ scenes: null }) as never;
+    const store = new RunStoreCore("orch-invalid-manifest");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "manifest", reason: /format|releaseVersion|scenes/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "run.json",
+    ]);
+  });
+
+  it("fails manifest relations without persisting the invalid manifest", async () => {
+    const ports = mockPorts();
+    ports.renderer = (release, scenePlan) => ({
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes: scenePlan.scenes,
+      volumes: [{
+        index: 1,
+        sceneIds: scenePlan.scenes.map((scene) => scene.id),
+        plannedTotalSeconds: 41,
+      }],
+    });
+    const store = new RunStoreCore("orch-invalid-manifest-relations");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "manifest", reason: /sum of its scene durations/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "run.json",
+    ]);
   });
 
   it("records failure at release stage when the source throws first", async () => {
@@ -61,6 +146,20 @@ describe("runPipeline", () => {
     expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
   });
 
+  it("attributes reserved intro/outro feature ids to the scene-plan stage", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "demo",
+      source: "fixture.md",
+      features: [{ id: "intro", title: "冲突开场", narration: "冲突旁白" }],
+    });
+    const store = new RunStoreCore("orch-reserved-feature");
+    await runPipeline(ports, store);
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure).toMatchObject({ stage: "scenePlan", reason: /reserved feature id/ });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual(["release.json", "run.json"]);
+  });
+
   it("rejects invalid provider output via schema instead of accepting it", async () => {
     const ports = mockPorts();
     ports.releaseSource = () => ({
@@ -74,6 +173,363 @@ describe("runPipeline", () => {
     expect(store.currentStatus).toBe("failed");
     expect(store.currentFailure?.stage).toBe("release");
     expect(store.currentFailure?.reason).toContain("features");
+  });
+
+  it("skips the evidence stage entirely when no codeEvidence port is provided", async () => {
+    const store = new RunStoreCore("orch-no-evidence");
+    await runPipeline(mockPorts(), store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual(["release.json", "scene.json", "manifest.json", "run.json"]);
+    expect(files).not.toContain("evidence.json");
+  });
+
+  it("records the evidence artifact between release and scenePlan when the port is provided", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = (release) => ({
+      pack: {
+        releaseVersion: release.version,
+        entries: [
+          {
+            id: "ev-1",
+            featureId: release.features[0]!.id,
+            kind: "commit",
+            reference: { location: "a".repeat(40) },
+            confidence: 0.5,
+          },
+        ],
+      },
+      entryPoints: [
+        {
+          id: `entry-${release.features[0]!.id}`,
+          featureId: release.features[0]!.id,
+          description: "入口候选",
+          confidence: 0.5,
+          evidenceIds: ["ev-1"],
+        },
+      ],
+    });
+    const store = new RunStoreCore("orch-evidence");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual([
+      "release.json",
+      "evidence.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("skips the gate stage when no confidenceGate port is provided even with evidence", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+    const store = new RunStoreCore("orch-no-gate");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual([
+      "release.json",
+      "evidence.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+    expect(files).not.toContain("gate.json");
+  });
+
+  it("records the gate artifact between evidence and scenePlan when the port is provided", async () => {
+    const ports = mockPorts();
+    const featureId = "mock-feature";
+    ports.codeEvidence = (release) => ({
+      pack: {
+        releaseVersion: release.version,
+        entries: [
+          {
+            id: "ev-1",
+            featureId: release.features[0]!.id,
+            kind: "commit",
+            reference: { location: "a".repeat(40) },
+            confidence: 0.9,
+          },
+        ],
+      },
+      entryPoints: [
+        {
+          id: `entry-${featureId}`,
+          featureId,
+          description: "入口候选",
+          confidence: 0.9,
+          evidenceIds: ["ev-1"],
+        },
+      ],
+    });
+    ports.confidenceGate = (release, evidence) => ({
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => {
+        const candidate = evidence.entryPoints.find((c) => c.featureId === feature.id);
+        if (!candidate || candidate.confidence < 0.8) {
+          return { featureId: feature.id, reason: "no_evidence", automatable: false, evidenceIds: [] };
+        }
+        return {
+          featureId: feature.id,
+          reason: "eligible",
+          automatable: true,
+          confidence: candidate.confidence,
+          evidenceIds: [...candidate.evidenceIds],
+        };
+      }),
+    });
+    const store = new RunStoreCore("orch-gate");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("completed");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+    const record = JSON.parse(
+      new TextDecoder().decode(store.collectFiles().find((f) => f.fileName === "run.json")?.bytes),
+    );
+    expect(record.artifacts).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "scene.json",
+      "manifest.json",
+    ]);
+  });
+
+  it("passes the gated feature set to the scene planner", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+    ports.confidenceGate = (release) => ({
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "no_evidence" as const,
+        automatable: false,
+        evidenceIds: [],
+      })),
+    });
+    let receivedContext: unknown;
+    ports.scenePlanner = (release, context) => {
+      receivedContext = context;
+      return {
+        releaseVersion: release.version,
+        scenes: release.features.map((feature) => ({
+          id: `scene-${feature.id}`,
+          featureId: feature.id,
+          title: feature.title,
+          narration: feature.narration,
+          narrationSource: "narration" as const,
+          plannedDurationSeconds: 15,
+        })),
+      };
+    };
+    const store = new RunStoreCore("orch-gate-context");
+    await runPipeline(ports, store);
+
+    expect(receivedContext).toMatchObject({
+      gatedFeatureIds: new Set(["mock-feature"]),
+    });
+  });
+
+  it("records desktop actions after gate and before the scene plan", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "demo",
+      source: "fixture.md",
+      features: [{
+        id: "mock-feature",
+        title: "示例功能介绍",
+        narration: "示例旁白",
+        sourceRef: { sectionIndex: 1, sectionTitle: "示例功能介绍", startLine: 1, endLine: 3 },
+      }],
+    });
+    ports.codeEvidence = (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+    ports.confidenceGate = (release) => ({
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "no_evidence" as const,
+        automatable: false,
+        evidenceIds: [],
+      })),
+    });
+    ports.desktopDemo = (release, gate) =>
+      gate.decisions.map((decision) => ({
+        featureId: decision.featureId,
+        status: "skipped" as const,
+        reason: "no_evidence" as const,
+        sourceRef: release.features.find((feature) => feature.id === decision.featureId)!.sourceRef!,
+        evidenceIds: [],
+      }));
+    const store = new RunStoreCore("orch-desktop");
+
+    await runPipeline(ports, store);
+
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "actions.json",
+      "scene.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("skips desktop when no desktop port is provided", async () => {
+    const store = new RunStoreCore("orch-no-desktop");
+    await runPipeline(mockPorts(), store);
+    expect(store.collectFiles().some((file) => file.fileName === "actions.json")).toBe(false);
+  });
+
+  it("fails at desktop after persisting failed actions and keeps earlier artifacts", async () => {
+    const ports = mockPorts();
+    ports.releaseSource = () => ({
+      version: "demo",
+      source: "fixture.md",
+      features: [{
+        id: "mock-feature",
+        title: "示例功能介绍",
+        narration: "示例旁白",
+        sourceRef: { sectionIndex: 1, sectionTitle: "示例功能介绍", startLine: 1, endLine: 3 },
+      }],
+    });
+    ports.codeEvidence = (release) => ({
+      pack: {
+        releaseVersion: release.version,
+        entries: [{
+          id: "ev-1",
+          featureId: release.features[0]!.id,
+          kind: "commit",
+          reference: { location: "a".repeat(40) },
+          confidence: 0.9,
+        }],
+      },
+      entryPoints: [],
+    });
+    ports.confidenceGate = (release) => ({
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "eligible" as const,
+        automatable: true,
+        confidence: 0.9,
+        evidenceIds: ["ev-1"],
+      })),
+    });
+    ports.desktopDemo = (release, gate) => [{
+      featureId: release.features[0]!.id,
+      status: "failed",
+      reason: "action_failed",
+      sourceRef: release.features[0]!.sourceRef!,
+      evidenceIds: [...gate.decisions[0]!.evidenceIds],
+      diagnostics: "fixture unavailable",
+    }];
+    const store = new RunStoreCore("orch-desktop-fail");
+
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure?.stage).toBe("desktop");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "actions.json",
+      "run.json",
+    ]);
+  });
+
+  it("attributes a gate port failure to the gate stage, keeping release and evidence artifacts", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+    ports.confidenceGate = () => {
+      throw new Error("gate exploded");
+    };
+    const store = new RunStoreCore("orch-gate-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("gate");
+    expect(store.currentFailure?.reason).toContain("gate exploded");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual(["release.json", "evidence.json", "run.json"]);
+  });
+
+  it("rejects gate output failing its schema via stage failure", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = (release) => ({
+      pack: { releaseVersion: release.version, entries: [] },
+      entryPoints: [],
+    });
+    ports.confidenceGate = () => ({
+      releaseVersion: "",
+      threshold: 0.8,
+      decisions: [],
+    });
+    const store = new RunStoreCore("orch-gate-invalid");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("gate");
+    expect(store.currentFailure?.reason).toContain("releaseVersion");
+  });
+
+  it("attributes an evidence port failure to the evidence stage, keeping release artifacts", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = () => {
+      throw new Error("git repo corrupted");
+    };
+    const store = new RunStoreCore("orch-evidence-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("evidence");
+    expect(store.currentFailure?.reason).toContain("git repo corrupted");
+    const files = store.collectFiles().map((file) => file.fileName);
+    expect(files).toEqual(["release.json", "run.json"]);
+  });
+
+  it("rejects evidence output failing its schema via stage failure", async () => {
+    const ports = mockPorts();
+    ports.codeEvidence = () => ({
+      pack: { releaseVersion: "", entries: [] },
+      entryPoints: [],
+    });
+    const store = new RunStoreCore("orch-evidence-invalid");
+    await runPipeline(ports, store);
+
+    expect(store.currentStatus).toBe("failed");
+    expect(store.currentFailure?.stage).toBe("evidence");
+    // Cross-artifact version consistency stays with validateReleasePackageRelations.
   });
 
   it("accepts fully custom fake providers without core changes", async () => {
@@ -109,5 +565,116 @@ describe("runPipeline", () => {
       "manifest.json",
       "run.json",
     ]);
+  });
+
+  it("records narration after the scene plan and before the manifest", async () => {
+    const ports = mockPorts();
+    ports.narration = (release, scenePlan) => ({
+      releaseVersion: release.version,
+      voice: "zh-CN-XiaoxiaoNeural",
+      scenes: scenePlan.scenes.map((scene) => ({
+        sceneId: scene.id,
+        featureId: scene.featureId,
+        audioFile: `narration-${scene.id}.mp3`,
+        audioDurationMs: 1_000,
+        voice: "zh-CN-XiaoxiaoNeural",
+        cues: [{ text: scene.narration, startMs: 0, endMs: 900 }],
+      })),
+    });
+    const store = new RunStoreCore("orch-narration");
+    await runPipeline(ports, store);
+
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "narration.json",
+      "manifest.json",
+      "run.json",
+    ]);
+  });
+
+  it("attributes narration failures while preserving prior artifacts", async () => {
+    const ports = mockPorts();
+    ports.narration = () => {
+      throw new Error("tts unavailable");
+    };
+    const store = new RunStoreCore("orch-narration-fail");
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure).toMatchObject({ stage: "narration", reason: "tts unavailable" });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "run.json",
+    ]);
+  });
+
+  it("rejects narration that does not cover the planned scenes", async () => {
+    const ports = mockPorts();
+    ports.narration = (release) => ({
+      releaseVersion: release.version,
+      voice: "zh-CN-XiaoxiaoNeural",
+      scenes: [],
+    });
+    const store = new RunStoreCore("orch-narration-incomplete");
+    await runPipeline(ports, store);
+
+    expect(store.currentFailure?.stage).toBe("narration");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json",
+      "scene.json",
+      "run.json",
+    ]);
+  });
+
+  it("records an optional composition after the manifest", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = ({ runId, manifest }) => ({
+      format: "showcraft.remotion/v1",
+      runId,
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    });
+    const store = new RunStoreCore("orch-composition");
+    await runPipeline(ports, store);
+    expect(store.currentStatus).toBe("completed");
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "manifest.json", "composition.json", "run.json",
+    ]);
+  });
+
+  it("attributes composition failures and preserves the manifest", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = () => { throw new Error("renderer unavailable"); };
+    const store = new RunStoreCore("orch-composition-fail");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toEqual({ stage: "composition", reason: "renderer unavailable" });
+    expect(store.collectFiles().map((file) => file.fileName)).toEqual([
+      "release.json", "scene.json", "manifest.json", "run.json",
+    ]);
+  });
+
+  it("rejects composition provenance for a different run", async () => {
+    const ports = mockPorts();
+    ports.runDirectory = "/tmp/showcraft-composition-test";
+    ports.composition = ({ manifest }) => ({
+      format: "showcraft.remotion/v1",
+      runId: "wrong-run",
+      volumes: manifest.volumes!.map((volume) => ({
+        index: volume.index,
+        mp4File: `video-volume-${volume.index}.mp4`,
+        durationSeconds: volume.plannedTotalSeconds,
+        sceneIds: volume.sceneIds,
+      })),
+    });
+    const store = new RunStoreCore("right-run");
+    await runPipeline(ports, store);
+    expect(store.currentFailure).toMatchObject({ stage: "composition", reason: expect.stringMatching(/run id/) });
   });
 });

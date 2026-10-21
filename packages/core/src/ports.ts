@@ -1,4 +1,26 @@
-import type { ReleaseBrief, RenderManifest, ScenePlan } from "./domain.js";
+import type {
+  DemoActionRecord,
+  Composition,
+  EntryPointCandidate,
+  EvidencePack,
+  GateResult,
+  NarrationArtifact,
+  ReleaseBrief,
+  RenderManifest,
+  ScenePlan,
+} from "./domain.js";
+import {
+  buildIntroOutroScenes,
+  estimateTotalSeconds,
+  planVolumes,
+  plannedFeatureDurationSeconds,
+} from "./durationOrchestration.js";
+
+/** Execute the gate-qualified desktop demo and return one auditable record per decision. */
+export type DesktopDemoPort = (
+  release: ReleaseBrief,
+  gate: GateResult,
+) => Promise<DemoActionRecord[]> | DemoActionRecord[];
 
 /**
  * Provider ports for the mock release pipeline. Ports are plain function
@@ -9,12 +31,123 @@ import type { ReleaseBrief, RenderManifest, ScenePlan } from "./domain.js";
 
 export type ReleaseSourcePort = () => Promise<ReleaseBrief> | ReleaseBrief;
 
-export type ScenePlannerPort = (release: ReleaseBrief) => Promise<ScenePlan> | ScenePlan;
+/**
+ * What the scene planner knows about the confidence gate's outcome. When a
+ * gate ran, `gatedFeatureIds` carries every feature the gate marked
+ * not-automatable so the planner can narrate a downgrade for them
+ * (`narrationSource: "fallback"`). Absent when no gate ran — planners keep
+ * their pre-gate behavior in that case.
+ */
+export type ScenePlanningContext = {
+  gatedFeatureIds?: ReadonlySet<string>;
+};
+
+export type ScenePlannerPort = (
+  release: ReleaseBrief,
+  context?: ScenePlanningContext,
+) => Promise<ScenePlan> | ScenePlan;
 
 export type RendererPort = (
   release: ReleaseBrief,
   scenePlan: ScenePlan,
 ) => Promise<RenderManifest> | RenderManifest;
+
+export type NarrationPort = (
+  release: ReleaseBrief,
+  scenePlan: ScenePlan,
+) => Promise<NarrationArtifact> | NarrationArtifact;
+
+export type CompositionPort = (input: {
+  runId: string;
+  runDirectory: string;
+  manifest: RenderManifest;
+  narration?: NarrationArtifact;
+}) => Promise<Composition> | Composition;
+
+export type NarrationErrorPhase = "handshake" | "synthesize";
+
+export class NarrationError extends Error {
+  constructor(
+    readonly phase: NarrationErrorPhase,
+    readonly diagnostics: string,
+    message: string,
+  ) {
+    super(`[${phase}] ${message}`);
+    this.name = "NarrationError";
+  }
+}
+
+/**
+ * Lifecycle outcome of a successful desktop `start()`: the app is ready to be
+ * driven (renderer serving HTTP, Electron main process alive) and `rendererUrl`
+ * is the address the readiness gate confirmed.
+ */
+export type DesktopStartInfo = {
+  rendererUrl: string;
+};
+
+/**
+ * Desktop runner lifecycle port (epic 3). `start()` resolves only once the
+ * desktop app is ready — readiness is the success condition, not a separate
+ * check — and rejects only after the spawned process tree has been fully
+ * reclaimed (zero leftover processes). `stop()` is an idempotent, whole
+ * process-group shutdown: calling it before start, after stop, or after the
+ * app exited on its own is a success no-op. Demo-action execution stays out of
+ * this contract for now (story 3.2).
+ */
+export type DesktopRunnerPort = {
+  start(): Promise<DesktopStartInfo>;
+  stop(): Promise<void>;
+};
+
+/** The lifecycle stage a `DesktopRunnerError` was raised in. */
+export type DesktopRunnerErrorPhase = "precondition" | "spawn" | "readiness" | "stop";
+
+/**
+ * Error contract for desktop lifecycle failures. `phase` maps each failure to
+ * its pipeline stage (so orchestrator integration in 3.2 can surface it as a
+ * StageFailure without re-deriving), and `diagnostics` is a human-readable
+ * multiline report: elapsed time, renderer URL, output tail excerpts and —
+ * where relevant — a process-group snapshot.
+ */
+export class DesktopRunnerError extends Error {
+  constructor(
+    readonly phase: DesktopRunnerErrorPhase,
+    readonly diagnostics: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "DesktopRunnerError";
+  }
+}
+
+export type EvidenceResult = {
+  pack: EvidencePack;
+  entryPoints: EntryPointCandidate[];
+};
+
+/**
+ * Optional evidence port: retrieve code evidence for a release's features
+ * from an allowed Git repository. Returning empty entries is the explicit
+ * "no evidence source" outcome; throwing fails the evidence stage.
+ */
+export type CodeEvidencePort = (release: ReleaseBrief) => Promise<EvidenceResult> | EvidenceResult;
+
+/**
+ * Optional gate port: classify each feature's entry-point candidates against
+ * the confidence threshold. Implementations wrap the core pure function
+ * `applyConfidenceGate`; the orchestrator runs the gate stage only when this
+ * port is provided (mock pipelines keep their exact pre-gate artifact set).
+ */
+export type ConfidenceGatePort = (
+  release: ReleaseBrief,
+  evidence: EvidenceResult,
+) => Promise<GateResult> | GateResult;
+
+/** Empty evidence pack for releases without a code evidence source. */
+export function createMockCodeEvidence(): CodeEvidencePort {
+  return (release) => ({ pack: { releaseVersion: release.version, entries: [] }, entryPoints: [] });
+}
 
 const MOCK_RELEASE: ReleaseBrief = {
   version: "demo",
@@ -33,23 +166,39 @@ export function createMockReleaseSource(): ReleaseSourcePort {
 }
 
 export function createMockScenePlanner(): ScenePlannerPort {
-  return (release) => ({
-    releaseVersion: release.version,
-    scenes: release.features.map((feature) => ({
-      id: `scene-${feature.id}`,
-      featureId: feature.id,
-      title: feature.title,
-      narration: feature.narration,
-      narrationSource: "narration",
-      plannedDurationSeconds: 15,
-    })),
-  });
+  return (release, context) => {
+    const gated = context?.gatedFeatureIds;
+    const { intro, outro } = buildIntroOutroScenes(release);
+    return {
+      releaseVersion: release.version,
+      scenes: [
+        intro,
+        ...release.features.map((feature) => ({
+          id: `scene-${feature.id}`,
+          featureId: feature.id,
+          title: feature.title,
+          narration: feature.narration,
+          narrationSource: gated?.has(feature.id) ? ("fallback" as const) : ("narration" as const),
+          plannedDurationSeconds: plannedFeatureDurationSeconds(feature.narration),
+        })),
+        outro,
+      ],
+    };
+  };
 }
 
 export function createMockRenderer(): RendererPort {
-  return (release, scenePlan) => ({
-    format: "showcraft.mock-manifest/v1",
-    releaseVersion: release.version,
-    scenes: scenePlan.scenes,
-  });
+  return (release, scenePlan) => {
+    const volumes = planVolumes(scenePlan.scenes).map((volume, index) => ({
+      index: index + 1,
+      sceneIds: volume.scenes.map((scene) => scene.id),
+      plannedTotalSeconds: estimateTotalSeconds(volume.scenes),
+    }));
+    return {
+      format: "showcraft.mock-manifest/v1",
+      releaseVersion: release.version,
+      scenes: scenePlan.scenes,
+      volumes,
+    };
+  };
 }

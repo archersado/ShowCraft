@@ -8,20 +8,67 @@ import {
   stageFileNames,
 } from "./runStore.js";
 import {
-  sampleManifest,
   sampleRelease as release,
-  sampleScenePlan,
+  sampleOrchestratedScenePlan,
 } from "./testing.js";
+import type { EvidencePack } from "./domain.js";
+import { createMockRenderer } from "./ports.js";
 
-const scenePlan = sampleScenePlan(release);
-const manifest = sampleManifest(release, scenePlan);
+const scenePlan = sampleOrchestratedScenePlan(release);
+const manifest = createMockRenderer()(release, scenePlan);
+
+const evidencePack: EvidencePack = { releaseVersion: release.version, entries: [] };
 
 describe("RunStoreCore", () => {
   it("stages schema-validated artifacts and completes a run", () => {
     const store = new RunStoreCore("run-ok");
-    for (const stage of runStageOrder) {
+    const gateResult = {
+      releaseVersion: release.version,
+      threshold: 0.8,
+      decisions: release.features.map((feature) => ({
+        featureId: feature.id,
+        reason: "no_evidence" as const,
+        automatable: false,
+        evidenceIds: [],
+      })),
+    };
+    for (const stage of ["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest", "composition"] as const) {
       const artifact =
-        stage === "release" ? release : stage === "scenePlan" ? scenePlan : manifest;
+        stage === "release"
+          ? release
+          : stage === "evidence"
+            ? { pack: evidencePack, entryPoints: [] }
+            : stage === "gate"
+              ? gateResult
+              : stage === "desktop"
+                ? { releaseVersion: release.version, threshold: 0.8, actions: [] }
+              : stage === "scenePlan"
+                ? scenePlan
+                : stage === "narration"
+                  ? {
+                    releaseVersion: release.version,
+                    voice: "zh-CN-XiaoxiaoNeural",
+                    scenes: scenePlan.scenes.map((scene) => ({
+                      sceneId: scene.id,
+                      featureId: scene.featureId,
+                      audioFile: `narration-${scene.id}.mp3`,
+                      audioDurationMs: 1_000,
+                      voice: "zh-CN-XiaoxiaoNeural",
+                      cues: [{ text: scene.narration, startMs: 0, endMs: 900 }],
+                    })),
+                  }
+                  : stage === "manifest"
+                    ? manifest
+                    : {
+                      format: "showcraft.remotion/v1" as const,
+                      runId: "run-ok",
+                      volumes: manifest.volumes!.map((volume) => ({
+                        index: volume.index,
+                        mp4File: `video-volume-${volume.index}.mp4`,
+                        durationSeconds: volume.plannedTotalSeconds,
+                        sceneIds: volume.sceneIds,
+                      })),
+                    };
       store.recordArtifact({ stage, value: artifact });
     }
     store.complete();
@@ -30,13 +77,123 @@ describe("RunStoreCore", () => {
     const files = store.collectFiles();
     expect(files.map((file) => file.fileName)).toEqual([
       "release.json",
+      "evidence.json",
+      "gate.json",
+      "actions.json",
       "scene.json",
+      "narration.json",
       "manifest.json",
+      "composition.json",
       "run.json",
     ]);
-    const record = JSON.parse(new TextDecoder().decode(files[3]?.bytes));
+    const record = JSON.parse(
+      new TextDecoder().decode(files.find((file) => file.fileName === "run.json")?.bytes),
+    );
     expect(record).toMatchObject({ runId: "run-ok", status: "completed" });
-    expect(record.artifacts).toEqual(["release.json", "scene.json", "manifest.json"]);
+    expect(record.artifacts).toEqual([
+      "release.json",
+      "evidence.json",
+      "gate.json",
+      "actions.json",
+      "scene.json",
+      "narration.json",
+      "manifest.json",
+      "composition.json",
+    ]);
+    const persistedManifest = JSON.parse(
+      new TextDecoder().decode(files.find((file) => file.fileName === "manifest.json")?.bytes),
+    );
+    expect(persistedManifest.volumes).toEqual([{
+      index: 1,
+      sceneIds: scenePlan.scenes.map((scene) => scene.id),
+      plannedTotalSeconds: 56,
+    }]);
+  });
+
+  it("stages evidence packs with entry points into a single evidence.json", () => {
+    const store = new RunStoreCore("run-evidence");
+    const event = store.recordArtifact({
+      stage: "evidence",
+      value: {
+        pack: {
+          releaseVersion: "v0.3.3",
+          entries: [
+            {
+              id: "ev-1",
+              featureId: "f1",
+              kind: "commit",
+              reference: { location: "a".repeat(40) },
+              confidence: 0.5,
+            },
+          ],
+        },
+        entryPoints: [
+          {
+            id: "entry-f1",
+            featureId: "f1",
+            description: "入口",
+            confidence: 0.5,
+            evidenceIds: ["ev-1"],
+          },
+        ],
+      },
+    });
+
+    expect(event.file.fileName).toBe("evidence.json");
+    const parsed = JSON.parse(new TextDecoder().decode(event.file.bytes));
+    expect(parsed.releaseVersion).toBe("v0.3.3");
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entryPoints).toHaveLength(1);
+  });
+
+  it("rejects evidence artifacts that fail their schema without staging anything", () => {
+    const store = new RunStoreCore("run-bad-evidence");
+    expect(() =>
+      store.recordArtifact({
+        stage: "evidence",
+        value: {
+          pack: { releaseVersion: "", entries: [] },
+          entryPoints: [],
+        },
+      }),
+    ).toThrow(DomainValidationError);
+    expect(store.collectFiles().some((file) => file.fileName === "evidence.json")).toBe(false);
+  });
+
+  it("rejects gate artifacts that fail their schema without staging anything", () => {
+    const store = new RunStoreCore("run-bad-gate");
+    expect(() =>
+      store.recordArtifact({
+        stage: "gate",
+        value: {
+          releaseVersion: "",
+          threshold: 0.8,
+          decisions: [],
+        },
+      }),
+    ).toThrow(DomainValidationError);
+    expect(store.collectFiles().some((file) => file.fileName === "gate.json")).toBe(false);
+  });
+
+  it("rejects gate decisions whose automatable flag contradicts their reason", () => {
+    const store = new RunStoreCore("run-gate-contradiction");
+    expect(() =>
+      store.recordArtifact({
+        stage: "gate",
+        value: {
+          releaseVersion: release.version,
+          threshold: 0.8,
+          decisions: [
+            {
+              featureId: release.features[0]!.id,
+              reason: "no_evidence",
+              automatable: true,
+              evidenceIds: [],
+            },
+          ],
+        },
+      }),
+    ).toThrow(DomainValidationError);
   });
 
   it("rejects artifacts that fail their schema without staging anything", () => {
@@ -95,7 +252,12 @@ describe("RunStoreCore", () => {
   });
 
   it("exposes stable stage ordering and file names", () => {
-    expect(runStageOrder).toEqual(["release", "scenePlan", "manifest"]);
+    expect(runStageOrder).toEqual(["release", "evidence", "gate", "desktop", "scenePlan", "narration", "manifest", "composition"]);
     expect(stageFileNames.release).toBe("release.json");
+    expect(stageFileNames.evidence).toBe("evidence.json");
+    expect(stageFileNames.gate).toBe("gate.json");
+    expect(stageFileNames.desktop).toBe("actions.json");
+    expect(stageFileNames.narration).toBe("narration.json");
+    expect(stageFileNames.composition).toBe("composition.json");
   });
 });
